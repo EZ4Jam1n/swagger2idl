@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package Swagger_Petstore_-_OpenAPI_3.0;
+
+message Address {
+  string city = 1;
+  string state = 2;
+  string street = 3;
+  string zip = 4;
+}
+
+message ApiResponse {
+  int32 code = 1;
+  string message = 2;
+  string type = 3;
+}
+
+message Category {
+  int64 id = 1;
+  string name = 2;
+}
+
+message Customer {
+  repeated string address = 1;
+  int64 id = 2;
+  string username = 3;
+}
+
+message Order {
+  bool complete = 1;
+  int64 id = 2;
+  int64 petId = 3;
+  int32 quantity = 4;
+  string shipDate = 5;
+  string status = 6;
+}
+
+message Pet {
+  category category = 1;
+  int64 id = 2;
+  string name = 3;
+  repeated string photoUrls = 4;
+  string status = 5;
+  repeated string tags = 6;
+}
+
+message Tag {
+  int64 id = 1;
+  string name = 2;
+}
+
+message User {
+  string email = 1;
+  string firstName = 2;
+  int64 id = 3;
+  string lastName = 4;
+  string password = 5;
+  string phone = 6;
+  int32 userStatus = 7;
+  string username = 8;
+}
+
+message createUsersWithListInputRequest {
+  repeated string items = 1;
+}
+
+message deleteOrderRequest {
+  int32 orderId = 1;
+}
+
+message deletePetRequest {
+  string api_key = 1;
+  int32 petId = 2;
+}
+
+message deleteUserRequest {
+  string username = 1;
+}
+
+message findPetsByStatusRequest {
+  string status = 1;
+}
+
+message findPetsByStatusResponse200 {
+  repeated string items = 1;
+}
+
+message findPetsByTagsRequest {
+  repeated string tags = 1;
+}
+
+message findPetsByTagsResponse200 {
+  repeated string items = 1;
+}
+
+message getInventoryResponse200 {
+  map<string, > getInventoryResponse200Nested = 1;
+}
+
+message getOrderByIdRequest {
+  int32 orderId = 1;
+}
+
+message getPetByIdRequest {
+  int32 petId = 1;
+}
+
+message getUserByNameRequest {
+  string username = 1;
+}
+
+message loginUserRequest {
+  string password = 1;
+  string username = 2;
+}
+
+message loginUserResponse200 {
+  string value = 1;
+}
+
+message updatePetWithFormRequest {
+  string name = 1;
+  int32 petId = 2;
+  string status = 3;
+}
+
+message uploadFileRequest {
+  string additionalMetadata = 1;
+  int32 petId = 2;
+  string value = 3;
+}
+
+service pet {
+  rpc addPet(Pet) returns (Pet);
+  rpc deletePet(deletePetRequest) returns ();
+  rpc findPetsByStatus(findPetsByStatusRequest) returns (findPetsByStatusResponse200);
+  rpc findPetsByTags(findPetsByTagsRequest) returns (findPetsByTagsResponse200);
+  rpc getPetById(getPetByIdRequest) returns (Pet);
+  rpc updatePet(Pet) returns (Pet);
+  rpc updatePetWithForm(updatePetWithFormRequest) returns ();
+  rpc uploadFile(uploadFileRequest) returns (ApiResponse);
+}
+
+service store {
+  rpc deleteOrder(deleteOrderRequest) returns ();
+  rpc getInventory() returns (getInventoryResponse200);
+  rpc getOrderById(getOrderByIdRequest) returns (Order);
+  rpc placeOrder(Order) returns (Order);
+}
+
+service user {
+  rpc createUser(User) returns (User);
+  rpc createUsersWithListInput(createUsersWithListInputRequest) returns (User);
+  rpc deleteUser(deleteUserRequest) returns ();
+  rpc getUserByName(getUserByNameRequest) returns (User);
+  rpc loginUser(loginUserRequest) returns (loginUserResponse200);
+  rpc logoutUser() returns ();
+  rpc updateUser(User) returns ();
+}
+
