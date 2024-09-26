@@ -285,10 +285,8 @@
                     application/json:
                         schema:
                             additionalProperties:
-                                additionalProperties:
-                                    format: int32
-                                    type: integer
-                                type: object
+                                format: int32
+                                type: integer
                             type: object
                 description: successful operation
         security:
