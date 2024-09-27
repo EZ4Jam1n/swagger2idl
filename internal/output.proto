@@ -6,9 +6,25 @@ import "google.protobuf.Empty";
 import "api.proto";
 
 message NewProduct {
-  string name = 1;
-  float price = 2;
-  string tags = 3;
+  NewProduct_name name = 1;
+  NewProduct_price price = 2;
+  NewProduct_tags tags = 3;
+  message NewProduct_name {
+    string NewProduct_name = 1;
+  }
+
+  message NewProduct_price {
+    float NewProduct_price = 1;
+  }
+
+  message NewProduct_tags {
+    repeated NewProduct_tagsItem NewProduct_tags = 1;
+    message NewProduct_tagsItem {
+      string NewProduct_tagsItem = 1;
+    }
+
+  }
+
 }
 
 message Request {
@@ -16,36 +32,84 @@ message Request {
 }
 
 message Response_200 {
-  string id = 1;
-  string name = 2;
-  float price = 3;
-  string tags = 4;
-  repeated Item value = 5;
+  repeated Response_200Item Response_200 = 1;
+  Response_200_id id = 2;
+  Response_200_name name = 3;
+  Response_200_price price = 4;
+  Response_200_tags tags = 5;
+  message Response_200_id {
+    string Response_200_id = 1;
+  }
+
+  message Response_200_name {
+    string Response_200_name = 1;
+  }
+
+  message Response_200_price {
+    float Response_200_price = 1;
+  }
+
+  message Response_200_tags {
+    repeated Response_200_tagsItem Response_200_tags = 1;
+    message Response_200_tagsItem {
+      string Response_200_tagsItem = 1;
+    }
+
+  }
+
 }
 
 message Response_201 {
-  string id = 1;
-  string name = 2;
-  float price = 3;
-  string tags = 4;
+  Response_201_id id = 1;
+  Response_201_name name = 2;
+  Response_201_price price = 3;
+  Response_201_tags tags = 4;
+  message Response_201_name {
+    string Response_201_name = 1;
+  }
+
+  message Response_201_price {
+    float Response_201_price = 1;
+  }
+
+  message Response_201_tags {
+    repeated Response_201_tagsItem Response_201_tags = 1;
+    message Response_201_tagsItem {
+      string Response_201_tagsItem = 1;
+    }
+
+  }
+
+  message Response_201_id {
+    string Response_201_id = 1;
+  }
+
 }
 
 message UpdateProduct {
-  string name = 1;
-  float price = 2;
+  UpdateProduct_name name = 1;
+  UpdateProduct_price price = 2;
+  message UpdateProduct_name {
+    string UpdateProduct_name = 1;
+  }
+
+  message UpdateProduct_price {
+    float UpdateProduct_price = 1;
+  }
+
 }
 
 service DefaultService {
   rpc DeleteMethod(Request) returns (google.protobuf.Empty) {
      option (api.delete) = "/products/:productId";
   }
-  rpc GetMethod(google.protobuf.Empty) returns (Response_200) {
-     option (api.get) = "/products";
+  rpc GetMethod(Request) returns (Response_200) {
+     option (api.get) = "/products/:productId";
   }
-  rpc PostMethod(NewProduct) returns (Response_201) {
+  rpc PostMethod() returns (Response_201) {
      option (api.post) = "/products";
   }
-  rpc PutMethod(UpdateProduct) returns (Response_200) {
+  rpc PutMethod(Request) returns (Response_200) {
      option (api.put) = "/products/:productId";
   }
 }

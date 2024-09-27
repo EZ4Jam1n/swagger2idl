@@ -44,45 +44,7 @@ func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 
 	// 生成消息
 	for _, message := range protoFile.Messages {
-		encoder.dst.WriteString(fmt.Sprintf("message %s {\n", message.Name))
-
-		if len(message.Options) > 0 {
-			encoder.dst.WriteString("  option")
-		}
-		// 生成消息级别选项
-		for _, option := range message.Options {
-			encoder.dst.WriteString(option.Value.(string))
-			encoder.encodeFieldOption(option)
-			encoder.dst.WriteString(";\n")
-		}
-
-		// 对字段按名称排序
-		sort.Slice(message.Fields, func(i, j int) bool {
-			return message.Fields[i].Name < message.Fields[j].Name
-		})
-
-		for i, field := range message.Fields {
-			repeated := ""
-			if field.Repeated {
-				repeated = "repeated "
-			}
-			encoder.dst.WriteString(fmt.Sprintf("  %s%s %s = %d", repeated, field.Type, field.Name, i+1))
-
-			// 生成字段级别的选项
-			if len(field.Options) > 0 {
-				encoder.dst.WriteString(" [\n    ")
-				for j, option := range field.Options {
-					encoder.encodeFieldOption(option)
-					if j < len(field.Options)-1 {
-						encoder.dst.WriteString(", ")
-					}
-				}
-				encoder.dst.WriteString("]")
-			}
-
-			encoder.dst.WriteString(";\n")
-		}
-		encoder.dst.WriteString("}\n\n")
+		encoder.encodeMessage(message, 0)
 	}
 
 	// 对服务按名称排序
@@ -117,6 +79,55 @@ func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 	}
 
 	return encoder.dst.String()
+}
+
+// encodeMessage 递归编码消息，并处理嵌套的消息和枚举
+func (e *Encoder) encodeMessage(message *protobuf.ProtoMessage, indentLevel int) {
+	indent := strings.Repeat("  ", indentLevel)
+	e.dst.WriteString(fmt.Sprintf("%smessage %s {\n", indent, message.Name))
+
+	// 生成消息级别选项
+	if len(message.Options) > 0 {
+		e.dst.WriteString(fmt.Sprintf("%s  option", indent))
+		for _, option := range message.Options {
+			e.encodeFieldOption(option)
+			e.dst.WriteString(";\n")
+		}
+	}
+
+	// 对字段按名称排序
+	sort.Slice(message.Fields, func(i, j int) bool {
+		return message.Fields[i].Name < message.Fields[j].Name
+	})
+
+	// 生成字段
+	for i, field := range message.Fields {
+		repeated := ""
+		if field.Repeated {
+			repeated = "repeated "
+		}
+		e.dst.WriteString(fmt.Sprintf("%s  %s%s %s = %d", indent, repeated, field.Type, field.Name, i+1))
+
+		// 生成字段级别的选项
+		if len(field.Options) > 0 {
+			e.dst.WriteString(" [\n    ")
+			for j, option := range field.Options {
+				e.encodeFieldOption(option)
+				if j < len(field.Options)-1 {
+					e.dst.WriteString(", ")
+				}
+			}
+			e.dst.WriteString("]")
+		}
+		e.dst.WriteString(";\n")
+	}
+
+	// 递归处理嵌套的消息
+	for _, nestedMessage := range message.Messages {
+		e.encodeMessage(nestedMessage, indentLevel+1) // 缩进增加
+	}
+
+	e.dst.WriteString(fmt.Sprintf("%s}\n\n", indent))
 }
 
 // encodeFieldOption 编码单个字段的 option

@@ -12,9 +12,11 @@ type ProtoFile struct {
 
 // ProtoMessage 代表一个 Proto 消息
 type ProtoMessage struct {
-	Name    string
-	Fields  []*ProtoField
-	Options []*Option
+	Name     string
+	Fields   []*ProtoField
+	Messages []*ProtoMessage // Proto 消息
+	Enums    []*ProtoEnum    // Proto 枚举
+	Options  []*Option
 }
 
 // ProtoField 代表一个 Proto 字段
@@ -22,9 +24,11 @@ type ProtoField struct {
 	Name     string
 	Type     string
 	Repeated bool
-	OneOf    []*ProtoField // oneof 字段集合，用于表示 oneOf 类型
-	Fields   []*ProtoField // 嵌套字段集合（例如对象类型）
-	Options  []*Option     // 新增 options 字段
+	OneOf    []*ProtoField   // oneof 字段集合，用于表示 oneOf 类型
+	Fields   []*ProtoField   // 嵌套字段集合（例如对象类型）
+	Messages []*ProtoMessage // Proto 消息
+	Enums    []*ProtoEnum    // Proto 枚举
+	Options  []*Option       // 新增 options 字段
 }
 
 // Option 代表 Proto 字段的选项
