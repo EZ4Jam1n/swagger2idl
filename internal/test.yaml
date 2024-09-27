@@ -1,0 +1,178 @@
+openapi: 3.0.0
+info:
+    title: 简化示例 API
+    version: 1.0.0
+    description: 包含不同组合的路径和 schema 的示例 API 文档，只有两个引用
+servers:
+    - url: https://api.example.com/v1
+paths:
+    /products:
+        get:
+            summary: 获取产品列表
+            responses:
+                '200':
+                    description: 产品列表
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    type: object
+                                    properties:
+                                        id:
+                                            type: string
+                                        name:
+                                            type: string
+                                        price:
+                                            type: number
+                                            format: float
+                                        tags:
+                                            type: array
+                                            items:
+                                                type: string
+                                    required:
+                                        - id
+                                        - name
+                                        - price
+
+        post:
+            summary: 创建新产品
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/NewProduct'
+            responses:
+                '201':
+                    description: 产品创建成功
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                    price:
+                                        type: number
+                                        format: float
+                                    tags:
+                                        type: array
+                                        items:
+                                            type: string
+                                required:
+                                    - id
+                                    - name
+                                    - price
+
+    /products/{productId}:
+        get:
+            summary: 获取单个产品信息
+            parameters:
+                - name: productId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: 产品信息
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                    price:
+                                        type: number
+                                        format: float
+                                    tags:
+                                        type: array
+                                        items:
+                                            type: string
+                                required:
+                                    - id
+                                    - name
+                                    - price
+
+        put:
+            summary: 更新产品信息
+            parameters:
+                - name: productId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateProduct'
+            responses:
+                '200':
+                    description: 产品更新成功
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                    price:
+                                        type: number
+                                        format: float
+                                    tags:
+                                        type: array
+                                        items:
+                                            type: string
+                                required:
+                                    - id
+                                    - name
+                                    - price
+
+        delete:
+            summary: 删除产品
+            parameters:
+                - name: productId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            responses:
+                '204':
+                    description: 产品删除成功
+
+components:
+    schemas:
+        NewProduct:
+            type: object
+            properties:
+                name:
+                    type: string
+                price:
+                    type: number
+                    format: float
+                tags:
+                    type: array
+                    items:
+                        type: string
+            required:
+                - name
+                - price
+
+        UpdateProduct:
+            type: object
+            properties:
+                name:
+                    type: string
+                price:
+                    type: number
+                    format: float

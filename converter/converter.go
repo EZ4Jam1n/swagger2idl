@@ -443,7 +443,6 @@ func generateMethodName(operationID, method string) string {
 	return strings.Title(strings.ToLower(method)) + "Method"
 }
 
-// ConvertSchemaToProtoMessage 将 OpenAPI Schema 转换为 Protobuf 消息
 func (c *ProtoConverter) ConvertSchemaToProtoMessage(schema *openapi3.Schema, name string) (*protobuf.ProtoMessage, error) {
 	protoMsg := &protobuf.ProtoMessage{Name: name}
 
@@ -465,11 +464,25 @@ func (c *ProtoConverter) ConvertSchemaToProtoMessage(schema *openapi3.Schema, na
 			if propSchema.Ref != "" {
 				propName = extractMessageNameFromRef(propSchema.Ref)
 			}
-			field, err := c.convertSchemaToProtoField(propName, propSchema.Value)
-			if err != nil {
-				return nil, err
+
+			// 处理数组类型
+			if propSchema.Value.Type != nil && propSchema.Value.Type.Includes("array") {
+				itemType, err := c.convertSchemaToProtoType(propSchema.Value.Items.Value)
+				if err != nil {
+					return nil, err
+				}
+
+				// 如果 items 是对象，生成 repeated message
+				field := &protobuf.ProtoField{Name: propName, Type: itemType}
+				protoMsg.Fields = append(protoMsg.Fields, field)
+			} else {
+				// 处理其他类型
+				field, err := c.convertSchemaToProtoField(propName, propSchema.Value)
+				if err != nil {
+					return nil, err
+				}
+				protoMsg.Fields = append(protoMsg.Fields, field)
 			}
-			protoMsg.Fields = append(protoMsg.Fields, field)
 		}
 
 		// 处理 additionalProperties（如果定义了）
@@ -482,7 +495,7 @@ func (c *ProtoConverter) ConvertSchemaToProtoMessage(schema *openapi3.Schema, na
 		}
 	} else {
 		// 处理非对象类型
-		fieldType, err := convertSchemaToProtoType(schema)
+		fieldType, err := c.convertSchemaToProtoType(schema)
 		if err != nil {
 			return nil, err
 		}
@@ -491,6 +504,187 @@ func (c *ProtoConverter) ConvertSchemaToProtoMessage(schema *openapi3.Schema, na
 	}
 
 	return protoMsg, nil
+}
+
+// convertSchemaToProtoType 将 OpenAPI 基本类型转换为 Protobuf 类型
+func (c *ProtoConverter) convertSchemaToProtoType(schema *openapi3.Schema) (string, error) {
+	if len(schema.Type.Slice()) == 0 {
+		return "", fmt.Errorf("schema type is missing")
+	}
+
+	mainType, err := getPrimaryType(schema.Type)
+	if err != nil {
+		return "", err
+	}
+
+	switch mainType {
+	case "string":
+		// 处理 string 的不同 format
+		switch schema.Format {
+		case "date-time":
+			return "string", nil
+		case "byte":
+			return "bytes", nil
+		case "binary":
+			return "bytes", nil
+		case "uuid":
+			return "string", nil
+		default:
+			return "string", nil
+		}
+	case "integer":
+		switch schema.Format {
+		case "int64":
+			return "int64", nil
+		case "int32", "":
+			return "int32", nil
+		default:
+			return "", fmt.Errorf("unsupported integer format: %s", schema.Format)
+		}
+	case "number":
+		switch schema.Format {
+		case "float":
+			return "float", nil
+		case "double":
+			return "double", nil
+		default:
+			return "", fmt.Errorf("unsupported number format: %s", schema.Format)
+		}
+	case "boolean":
+		return "bool", nil
+	case "array":
+		// 处理数组类型
+		if schema.Items.Ref != "" {
+			return "repeated " + extractMessageNameFromRef(schema.Items.Ref), nil
+		}
+		if schema.Items != nil && schema.Items.Value != nil {
+			// 这里处理 items 是 object 的情况，生成 repeated message
+			if schema.Items.Value.Type != nil && schema.Items.Value.Type.Includes("object") {
+				messageName := schema.Items.Value.Title
+				if messageName == "" {
+					messageName = "Item"
+				}
+				message, err := c.convertObjectToProtoMessage(messageName, schema.Items.Value)
+				if err != nil {
+					return "", err
+				}
+				return "repeated " + message.Name, nil
+			}
+
+			// 处理其他类型
+			itemType, err := c.convertSchemaToProtoType(schema.Items.Value)
+			if err != nil {
+				return "", err
+			}
+			return "repeated " + itemType, nil
+		}
+		return "", fmt.Errorf("array type schema must have items defined")
+	case "object":
+		// 处理嵌套对象
+		message, err := c.convertObjectToProtoMessage(schema.Title, schema)
+		if err != nil {
+			return "", err
+		}
+		return message.Name, nil
+	default:
+		return "", fmt.Errorf("unsupported schema type: %s", mainType)
+	}
+}
+
+// convertSchemaToProtoField 根据 OpenAPI schema 生成 Protobuf 字段，递归处理嵌套类型
+func (c *ProtoConverter) convertSchemaToProtoField(fieldName string, schema *openapi3.Schema) (*protobuf.ProtoField, error) {
+	var protoType string
+
+	// 检查 schema 是否有组合类型定义 (oneOf, anyOf, allOf)
+	if len(schema.OneOf) > 0 {
+		return c.handleOneOf(fieldName, schema.OneOf)
+	}
+	if len(schema.AnyOf) > 0 {
+		return c.handleOneOf(fieldName, schema.AnyOf) // 与 oneOf 逻辑相似
+	}
+	if len(schema.AllOf) > 0 {
+		return c.handleAllOf(fieldName, schema.AllOf)
+	}
+
+	// 处理对象类型的 additionalProperties，将其转换为 Protobuf map
+	if schema.Type != nil && schema.Type.Includes("object") {
+		if schema.AdditionalProperties.Schema != nil {
+			// 处理 additionalProperties 为 map 的情况
+			keyType := "string" // Protobuf 的 map 键类型通常是 string
+			valueSchema := schema.AdditionalProperties.Schema.Value
+			valueType, err := c.convertSchemaToProtoType(valueSchema)
+			if err != nil {
+				return nil, err
+			}
+
+			protoType = fmt.Sprintf("map<%s, %s>", keyType, valueType)
+		} else {
+			// 否则处理为嵌套的 message
+			nestedMessage, err := c.convertObjectToProtoMessage(fieldName, schema)
+			if err != nil {
+				return nil, err
+			}
+			return &protobuf.ProtoField{
+				Name: fieldName,
+				Type: nestedMessage.Name, // 引用嵌套的消息名
+			}, nil
+		}
+	} else {
+		// 处理其他基础类型
+		fieldType, err := c.convertSchemaToProtoType(schema)
+		if err != nil {
+			return nil, err
+		}
+		protoType = fieldType
+	}
+
+	field := &protobuf.ProtoField{
+		Name: fieldName,
+		Type: protoType,
+	}
+
+	if c.converterOption.openapiOption {
+		optionStr := structToProtobuf(schema, "    ")
+
+		// 添加 openapi.schema 注解
+		schemaOption := &protobuf.Option{
+			Name:  "openapi.property",
+			Value: optionStr,
+		}
+		field.Options = append(field.Options, schemaOption)
+	}
+	return field, nil
+}
+
+// convertObjectToProtoMessage 将 OpenAPI object 类型的 schema 转换为 Protobuf 嵌套消息
+func (c *ProtoConverter) convertObjectToProtoMessage(messageName string, schema *openapi3.Schema) (*protobuf.ProtoMessage, error) {
+	// 创建一个新的 Protobuf 消息
+	message := &protobuf.ProtoMessage{Name: messageName}
+
+	// 遍历对象的 properties 并生成 Protobuf 字段
+	for propName, propSchemaRef := range schema.Properties {
+		// 检查是否存在 $ref
+		if propSchemaRef.Ref != "" {
+			// 处理 $ref，提取引用的消息名
+			refMessageName := extractMessageNameFromRef(propSchemaRef.Ref)
+			field := &protobuf.ProtoField{
+				Name: propName,
+				Type: refMessageName, // 引用的 Protobuf 消息类型
+			}
+			message.Fields = append(message.Fields, field)
+		} else if propSchemaRef.Value != nil {
+			// 递归调用 convertSchemaToProtoField 来生成字段
+			field, err := c.convertSchemaToProtoField(propName, propSchemaRef.Value)
+			if err != nil {
+				return nil, err
+			}
+
+			message.Fields = append(message.Fields, field)
+		}
+	}
+
+	// 返回生成的 Protobuf 嵌套消息
+	return message, nil
 }
 
 func structToProtobuf(value interface{}, indent string) string {
@@ -637,110 +831,6 @@ func isZeroValue(v reflect.Value) bool {
 	}
 }
 
-// convertSchemaToProtoField 根据 OpenAPI schema 生成 Protobuf 字段，递归处理嵌套类型
-func (c *ProtoConverter) convertSchemaToProtoField(fieldName string, schema *openapi3.Schema) (*protobuf.ProtoField, error) {
-	var protoType string
-
-	// 检查 schema 是否有组合类型定义 (oneOf, anyOf, allOf)
-	if len(schema.OneOf) > 0 {
-		return c.handleOneOf(fieldName, schema.OneOf)
-	}
-	if len(schema.AnyOf) > 0 {
-		return c.handleOneOf(fieldName, schema.AnyOf) // 与 oneOf 逻辑相似
-	}
-	if len(schema.AllOf) > 0 {
-		return c.handleAllOf(fieldName, schema.AllOf)
-	}
-
-	// 处理对象类型的 additionalProperties，将其转换为 Protobuf map
-	if schema.Type != nil && schema.Type.Includes("object") {
-		if schema.AdditionalProperties.Schema != nil {
-			// 处理 additionalProperties 为 map 的情况
-			keyType := "string" // Protobuf 的 map 键类型通常是 string
-			valueSchema := schema.AdditionalProperties.Schema.Value
-			valueType, err := convertSchemaToProtoType(valueSchema)
-			if err != nil {
-				return nil, err
-			}
-
-			protoType = fmt.Sprintf("map<%s, %s>", keyType, valueType)
-		} else {
-			// 否则处理为嵌套的 message
-			nestedMessage, err := c.convertObjectToProtoMessage(fieldName, schema)
-			if err != nil {
-				return nil, err
-			}
-			return &protobuf.ProtoField{
-				Name: fieldName,
-				Type: nestedMessage.Name, // 引用嵌套的消息名
-			}, nil
-		}
-	} else {
-		// 处理其他基础类型
-		fieldType, err := convertSchemaToProtoType(schema)
-		if err != nil {
-			return nil, err
-		}
-		protoType = fieldType
-	}
-
-	field := &protobuf.ProtoField{
-		Name: fieldName,
-		Type: protoType,
-	}
-
-	if c.converterOption.openapiOption {
-		optionStr := structToProtobuf(schema, "    ")
-
-		// 添加 openapi.schema 注解
-		schemaOption := &protobuf.Option{
-			Name:  "openapi.property",
-			Value: optionStr,
-		}
-		field.Options = append(field.Options, schemaOption)
-	}
-	return field, nil
-}
-
-// convertSchemaToProtoType 将 OpenAPI 基本类型转换为 Protobuf 类型
-func convertSchemaToProtoType(schema *openapi3.Schema) (string, error) {
-	if len(schema.Type.Slice()) == 0 {
-		return "", fmt.Errorf("schema type is missing")
-	}
-
-	mainType, err := getPrimaryType(schema.Type)
-	if err != nil {
-		return "", err
-	}
-
-	switch mainType {
-	case "string":
-		return "string", nil
-	case "integer":
-		if schema.Format == "int64" {
-			return "int64", nil
-		}
-		return "int32", nil
-	case "boolean":
-		return "bool", nil
-	case "number":
-		if schema.Format == "float" {
-			return "float", nil
-		} else if schema.Format == "double" {
-			return "double", nil
-		}
-		return "", fmt.Errorf("unsupported number format: %s", schema.Format)
-	case "array":
-		if schema.Items != nil && schema.Items.Value != nil {
-			itemType := convertSimpleTypeToProto(getFirstType(schema.Items.Value.Type))
-			return "repeated " + itemType, nil
-		}
-		return "", fmt.Errorf("array type schema must have items defined")
-	default:
-		return "", fmt.Errorf("unsupported schema type: %s", mainType)
-	}
-}
-
 // handleOneOf 处理 oneOf 或 anyOf 组合类型并生成 Protobuf 的 oneof 字段
 func (c *ProtoConverter) handleOneOf(fieldName string, schemas openapi3.SchemaRefs) (*protobuf.ProtoField, error) {
 	var oneOfFields []*protobuf.ProtoField
@@ -819,37 +909,6 @@ func (c *ProtoConverter) convertComplexSchemaToProtoMessage(fieldName string, sc
 		}
 	}
 
-	return message, nil
-}
-
-// convertObjectToProtoMessage 将 OpenAPI object 类型的 schema 转换为 Protobuf 嵌套消息
-func (c *ProtoConverter) convertObjectToProtoMessage(messageName string, schema *openapi3.Schema) (*protobuf.ProtoMessage, error) {
-	// 创建一个新的 Protobuf 消息
-	message := &protobuf.ProtoMessage{Name: messageName}
-
-	// 遍历对象的 properties 并生成 Protobuf 字段
-	for propName, propSchemaRef := range schema.Properties {
-		// 检查是否存在 $ref
-		if propSchemaRef.Ref != "" {
-			// 处理 $ref，提取引用的消息名
-			refMessageName := extractMessageNameFromRef(propSchemaRef.Ref)
-			field := &protobuf.ProtoField{
-				Name: propName,
-				Type: refMessageName, // 引用的 Protobuf 消息类型
-			}
-			message.Fields = append(message.Fields, field)
-		} else if propSchemaRef.Value != nil {
-			// 递归调用 convertSchemaToProtoField 来生成字段
-			field, err := c.convertSchemaToProtoField(propName, propSchemaRef.Value)
-			if err != nil {
-				return nil, err
-			}
-
-			message.Fields = append(message.Fields, field)
-		}
-	}
-
-	// 返回生成的 Protobuf 嵌套消息
 	return message, nil
 }
 
