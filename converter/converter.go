@@ -68,12 +68,12 @@ func (c *ProtoConverter) Convert(spec *openapi3.T) error {
 func (c *ProtoConverter) convertComponentsToProtoMessages(components *openapi3.Components) error {
 	for name, schemaRef := range components.Schemas {
 		schema := schemaRef
-		message, err := c.ConvertSchemaToProtoMessage(schema, name)
+		message, err := c.ConvertSchemaToProtoFieldOrMessage(schema, name)
 		if err != nil {
 			return fmt.Errorf("error converting schema %s: %w", name, err)
 		}
 		// 将生成的 ProtoMessage 添加到 ProtoFile 中
-		c.addMessageToProto(message)
+		c.addMessageToProto(message.(*protobuf.ProtoMessage))
 	}
 	return nil
 }
@@ -165,7 +165,6 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 	return services, nil
 }
 
-// generateRequestMessage 生成请求消息
 func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (string, error) {
 	messageName := operation.OperationID + "Request"
 	message := &protobuf.ProtoMessage{Name: messageName}
@@ -177,7 +176,6 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (
 
 	// 处理 requestBody
 	if operation.RequestBody != nil {
-		// 如果是 $ref，直接返回引用的消息名
 		if operation.RequestBody.Ref != "" {
 			return extractMessageNameFromRef(operation.RequestBody.Ref), nil
 		}
@@ -186,84 +184,46 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (
 			for _, mediaType := range operation.RequestBody.Value.Content {
 				schema := mediaType.Schema
 				if schema != nil && schema.Value != nil {
-					//if schema.Ref != "" {
-					//	return extractMessageNameFromRef(schema.Ref), nil
-					//}
-					// 生成消息字段并加入 message
-					requestMsg, err := c.ConvertSchemaToProtoMessage(schema, messageName)
+					// 生成消息字段或消息
+					fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema, messageName)
 					if err != nil {
 						return "", err
 					}
-					// 把 requestBody 的消息字段添加到 message 中
-					message.Fields = append(message.Fields, requestMsg.Fields...)
+
+					// 判断返回的是 field 还是 message
+					switch v := fieldOrMessage.(type) {
+					case *protobuf.ProtoField:
+						// 如果是字段，需要封装成消息
+						newMessage := &protobuf.ProtoMessage{Name: messageName}
+						newMessage.Fields = append(newMessage.Fields, v)
+						c.addMessageToProto(newMessage)
+						return newMessage.Name, nil
+					case *protobuf.ProtoMessage:
+						// 如果是消息，直接处理
+						message.Fields = append(message.Fields, v.Fields...)
+					}
 				}
 			}
 		}
-
 	}
 
-	// 处理 Parameters（query, path, header 等）
+	// 处理 Parameters
 	if len(operation.Parameters) > 0 {
 		for _, param := range operation.Parameters {
 			if param.Value.Schema != nil && param.Value.Schema.Value != nil {
-				var field *protobuf.ProtoField
-
-				// 动态判断参数类型
-				schemaType := getFirstType(param.Value.Schema.Value.Type)
-
-				switch param.Value.In {
-				case "path", "cookie", "header", "query":
-					// 动态根据不同类型来生成对应的Proto类型
-					switch schemaType {
-					case "string":
-						fieldType := "string"
-						field = &protobuf.ProtoField{
-							Name: param.Value.Name,
-							Type: fieldType,
-						}
-					case "number", "integer":
-						fieldType := "int32" // 或 "int64" 视情况而定
-						field = &protobuf.ProtoField{
-							Name: param.Value.Name,
-							Type: fieldType,
-						}
-					case "boolean":
-						fieldType := "bool"
-						field = &protobuf.ProtoField{
-							Name: param.Value.Name,
-							Type: fieldType,
-						}
-					case "array":
-						// 假设数组元素是简单类型，获取items的类型并处理
-						arrayType := convertSimpleTypeToProto(getFirstType(param.Value.Schema.Value.Items.Value.Type))
-						fieldType := "repeated " + arrayType
-						field = &protobuf.ProtoField{
-							Name: param.Value.Name,
-							Type: fieldType,
-						}
-					case "object":
-						// 如果是对象类型，需要递归生成子消息
-						objectMessage, err := c.ConvertSchemaToProtoMessage(param.Value.Schema, param.Value.Name)
-						if err != nil {
-							return "", err
-						}
-						c.addMessageToProto(objectMessage)
-
-						field = &protobuf.ProtoField{
-							Name: param.Value.Name,
-							Type: objectMessage.Name,
-						}
-					default:
-						// 忽略未知的类型
-						continue
-					}
-				default:
-					// 忽略不支持的参数类型
-					continue
+				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(param.Value.Schema, param.Value.Name)
+				if err != nil {
+					return "", err
 				}
 
-				// 将生成的字段加入当前的 Protobuf 消息
-				message.Fields = append(message.Fields, field)
+				// 判断返回的是 field 还是 message
+				switch v := fieldOrMessage.(type) {
+				case *protobuf.ProtoField:
+					message.Fields = append(message.Fields, v)
+				case *protobuf.ProtoMessage:
+					c.addMessageToProto(v)
+					message.Fields = append(message.Fields, &protobuf.ProtoField{Name: param.Value.Name, Type: v.Name})
+				}
 			}
 		}
 	}
@@ -274,93 +234,99 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (
 		return message.Name, nil
 	}
 
-	// 如果没有参数或 requestBody，返回空
 	return "", nil
 }
 
-// generateResponseMessage 生成响应消息
 func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation) (string, error) {
 	if operation.Responses == nil {
 		return "", nil
 	}
 
-	// 获取所有的 responseRef
 	responses := operation.Responses.Map()
 	responseCount := len(responses)
 
-	// 如果只有一个 responseRef，直接处理并返回，不需要封装
 	if responseCount == 1 {
 		for statusCode, responseRef := range responses {
+			if responseRef.Ref == "" && (responseRef.Value == nil || len(responseRef.Value.Content) == 0) {
+				c.AddProtoImport("google.protobuf.Empty")
+				return "google.protobuf.Empty", nil
+			}
 			return c.processSingleResponse(statusCode, responseRef, operation)
 		}
 	}
 
-	// 如果有多个 responseRef，创建一个 wrapper message
+	// 创建封装的 wrapper message
 	wrapperMessageName := operation.OperationID
-	wrapperMessage := &protobuf.ProtoMessage{
-		Name: wrapperMessageName,
-	}
+	wrapperMessage := &protobuf.ProtoMessage{Name: wrapperMessageName}
 
-	// 遍历所有的 responseRef
+	emptyFlag := true
+
+	// 遍历所有 responseRef
 	for statusCode, responseRef := range responses {
-		// 处理每一个 responseRef
-		if responseRef.Value != nil && responseRef.Value.Content != nil {
-			messageName, err := c.processSingleResponse(statusCode, responseRef, operation)
-			if err != nil {
-				return "", err
-			}
-			// 添加每个 response 到 wrapper message 中
-			field := &protobuf.ProtoField{
-				Name: "response_" + statusCode,
-				Type: messageName,
-			}
-			wrapperMessage.Fields = append(wrapperMessage.Fields, field)
+		if responseRef.Ref == "" && (responseRef.Value == nil || len(responseRef.Value.Content) == 0) {
+			break
 		}
+		emptyFlag = false
+		messageName, err := c.processSingleResponse(statusCode, responseRef, operation)
+		if err != nil {
+			return "", err
+		}
+
+		// 添加每个 response 到 wrapper message 中
+		field := &protobuf.ProtoField{
+			Name: "response_" + statusCode,
+			Type: messageName,
+		}
+		wrapperMessage.Fields = append(wrapperMessage.Fields, field)
 	}
 
-	// 将封装好的 wrapperMessage 添加到 proto 中
+	if emptyFlag {
+		c.AddProtoImport("google.protobuf.Empty")
+		return "google.protobuf.Empty", nil
+	}
+
+	// 添加封装好的 wrapperMessage 到 proto 中
 	c.addMessageToProto(wrapperMessage)
 
 	// 返回封装好的消息名称
 	return wrapperMessageName, nil
 }
 
-// processSingleResponse 处理单个 responseRef 并生成对应的 Protobuf message
 func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *openapi3.ResponseRef, operation *openapi3.Operation) (string, error) {
-	// 如果是 $ref，直接返回引用的消息名
 	if responseRef.Ref != "" {
 		return extractMessageNameFromRef(responseRef.Ref), nil
 	}
 
-	if responseRef.Value == nil || responseRef.Value.Content == nil {
-		c.AddProtoImport("google.protobuf.Empty")
-		return "google.protobuf.Empty", nil
-	}
-
-	// 获取 response 的值
+	// 处理 response 内容
 	response := responseRef.Value
 	for _, mediaType := range response.Content {
 		schema := mediaType.Schema
 		if schema != nil {
-			// 如果 schema 有 $ref，生成引用的消息名并返回
 			if schema.Ref != "" {
 				return extractMessageNameFromRef(schema.Ref), nil
 			}
+
 			if schema.Value != nil {
-				// 生成对应的 Protobuf message 名称
 				messageName := operation.OperationID + "Response_" + statusCode
 
-				// 根据 schema 生成 Proto message
-				responseMsg, err := c.ConvertSchemaToProtoMessage(schema, messageName)
+				// 生成消息字段或消息
+				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema, messageName)
 				if err != nil {
 					return "", err
 				}
 
-				// 将生成的 response message 添加到 proto 中
-				c.addMessageToProto(responseMsg)
-
-				// 返回生成的消息名称
-				return responseMsg.Name, nil
+				switch v := fieldOrMessage.(type) {
+				case *protobuf.ProtoField:
+					// 如果是字段，需要封装成消息
+					newMessage := &protobuf.ProtoMessage{Name: messageName}
+					newMessage.Fields = append(newMessage.Fields, v)
+					c.addMessageToProto(newMessage)
+					return newMessage.Name, nil
+				case *protobuf.ProtoMessage:
+					// 如果是消息，直接处理
+					c.addMessageToProto(v)
+					return v.Name, nil
+				}
 			}
 		}
 	}
@@ -380,16 +346,16 @@ func (c *ProtoConverter) handleNestedAdditionalProperties(schema *openapi3.Schem
 			nestedMessageName := defaultName + "Nested"
 
 			// 递归生成嵌套的 Protobuf 消息
-			nestedMsg, err := c.ConvertSchemaToProtoMessage(schema.AdditionalProperties.Schema, nestedMessageName)
+			nestedMsg, err := c.ConvertSchemaToProtoFieldOrMessage(schema.AdditionalProperties.Schema, nestedMessageName)
 			if err != nil {
 				return &protobuf.ProtoField{}, err
 			}
-
+			nestedMsgA := nestedMsg.(*protobuf.ProtoMessage)
 			// 将嵌套消息添加到 ProtoFile 中
-			c.addMessageToProto(nestedMsg)
+			c.addMessageToProto(nestedMsgA)
 
 			// 使用嵌套消息的名称作为 Map 的值类型
-			valueType = nestedMsg.Name
+			valueType = nestedMsgA.Name
 		} else {
 			// 处理简单类型
 			valueType = convertSimpleTypeToProto(getFirstType(schema.AdditionalProperties.Schema.Value.Type))
@@ -411,173 +377,122 @@ func (c *ProtoConverter) handleNestedAdditionalProperties(schema *openapi3.Schem
 	return &protobuf.ProtoField{}, fmt.Errorf("additionalProperties must have a schema")
 }
 
-func (c *ProtoConverter) ConvertSchemaToProtoMessage(schemaRef *openapi3.SchemaRef, parentMessageName string) (*protobuf.ProtoMessage, error) {
+func (c *ProtoConverter) ConvertSchemaToProtoFieldOrMessage(schemaRef *openapi3.SchemaRef, fieldName string) (interface{}, error) {
 	if schemaRef.Ref != "" {
-		return &protobuf.ProtoMessage{Name: extractMessageNameFromRef(schemaRef.Ref)}, nil
+		// 如果是 $ref，直接返回引用的消息名，而不生成嵌套消息
+		return &protobuf.ProtoField{Name: extractMessageNameFromRef(schemaRef.Ref), Type: extractMessageNameFromRef(schemaRef.Ref)}, nil
 	}
 
 	schema := schemaRef.Value
-	message := &protobuf.ProtoMessage{Name: parentMessageName}
 
 	if schema.Type != nil {
 		var protoType string
-		var fieldMessages []*protobuf.ProtoMessage
-
 		if schema.Type.Includes("string") {
+			// 处理 string 类型
 			if schema.Format == "date" || schema.Format == "date-time" {
 				protoType = "google.protobuf.Timestamp"
 				c.AddProtoImport("google/protobuf/timestamp.proto")
 			} else {
 				protoType = "string"
 			}
-		}
-		if schema.Type.Includes("integer") {
+		} else if schema.Type.Includes("integer") {
+			// 处理 integer 类型
 			if schema.Format == "int32" {
 				protoType = "int32"
 			} else {
 				protoType = "int64"
 			}
-		}
-
-		if schema.Type.Includes("number") {
+		} else if schema.Type.Includes("number") {
+			// 处理 number 类型
 			if schema.Format == "float" {
 				protoType = "float"
 			} else {
 				protoType = "double"
 			}
-		}
-
-		if schema.Type.Includes("boolean") {
+		} else if schema.Type.Includes("boolean") {
+			// 处理 boolean 类型
 			protoType = "bool"
-		}
-
-		if schema.Type.Includes("array") {
+		} else if schema.Type.Includes("array") {
+			// 处理 array 类型
 			if schema.Items != nil {
-				itemMessage, err := c.ConvertSchemaToProtoMessage(schema.Items, parentMessageName+"Item")
+				itemSchema := schema.Items
+				// 递归处理数组的 items
+				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(itemSchema, fieldName+"Item")
 				if err != nil {
 					return nil, err
 				}
-				protoType = "repeated " + itemMessage.Name
-				fieldMessages = append(fieldMessages, itemMessage)
-				// 将数组的子消息添加为父消息的嵌套消息
-				c.addNestedMessageToParent(message, itemMessage)
-			}
-		}
 
-		if schema.Type.Includes("object") {
+				if field, ok := fieldOrMessage.(*protobuf.ProtoField); ok {
+					// 数组的 items 是基础类型，生成 repeated 字段
+					return &protobuf.ProtoField{
+						Name:     fieldName,
+						Type:     "repeated " + field.Type, // 这里直接生成 repeated 类型
+						Repeated: true,
+					}, nil
+				} else if message, ok := fieldOrMessage.(*protobuf.ProtoMessage); ok {
+					// 数组的 items 是对象类型，生成 repeated 嵌套 message
+					return &protobuf.ProtoField{
+						Name:     fieldName,
+						Type:     "repeated " + message.Name, // 生成 repeated 嵌套 message 类型
+						Repeated: true,
+					}, nil
+				}
+			}
+		} else if schema.Type.Includes("object") {
+			// 处理 object 类型，生成 message
+			message := &protobuf.ProtoMessage{Name: fieldName}
 			for propName, propSchema := range schema.Properties {
-				fieldMessage, err := c.ConvertSchemaToProtoMessage(propSchema, parentMessageName+"_"+propName)
+				// 递归处理子属性
+				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(propSchema, propName)
 				if err != nil {
 					return nil, err
 				}
-				field := &protobuf.ProtoField{
-					Name:     propName,
-					Type:     fieldMessage.Name,
-					Messages: []*protobuf.ProtoMessage{fieldMessage}, // 将子message加到字段的Messages中
+
+				if field, ok := fieldOrMessage.(*protobuf.ProtoField); ok {
+					// 属性是基础类型，作为字段加入消息
+					message.Fields = append(message.Fields, field)
+				} else if nestedMessage, ok := fieldOrMessage.(*protobuf.ProtoMessage); ok {
+					// 属性是对象类型，作为嵌套消息加入父消息
+					c.addNestedMessageToParent(message, nestedMessage)
+					message.Fields = append(message.Fields, &protobuf.ProtoField{
+						Name: propName,
+						Type: nestedMessage.Name,
+					})
 				}
-				message.Fields = append(message.Fields, field)
-				// 将嵌套对象的子消息添加为父消息的嵌套消息
-				c.addNestedMessageToParent(message, fieldMessage)
 			}
+
+			// 处理 additionalProperties
 			if schema.AdditionalProperties.Schema != nil {
 				mapValueType := "string"
-				if schema.AdditionalProperties.Schema != nil {
-					additionalPropMessage, err := c.ConvertSchemaToProtoMessage(schema.AdditionalProperties.Schema, parentMessageName+"AdditionalProperties")
-					if err != nil {
-						return nil, err
-					}
-					mapValueType = additionalPropMessage.Name
-					c.addNestedMessageToParent(message, additionalPropMessage)
+				additionalPropMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema.AdditionalProperties.Schema, fieldName+"AdditionalProperties")
+				if err != nil {
+					return nil, err
 				}
-				field := &protobuf.ProtoField{
-					Name:     "additionalProperties",
-					Type:     "map<string, " + mapValueType + ">",
-					Messages: fieldMessages, // 将生成的子消息加到字段的Messages中
+				if message, ok := additionalPropMessage.(*protobuf.ProtoMessage); ok {
+					mapValueType = message.Name
 				}
-				message.Fields = append(message.Fields, field)
+				message.Fields = append(message.Fields, &protobuf.ProtoField{
+					Name: "additionalProperties",
+					Type: "map<string, " + mapValueType + ">",
+				})
 			}
+
+			return message, nil
 		}
 
-		if protoType != "" {
-			field := &protobuf.ProtoField{
-				Name:     parentMessageName,
-				Type:     protoType,
-				Messages: fieldMessages, // 将生成的子消息加到字段的Messages中
-			}
-			message.Fields = append(message.Fields, field)
-		}
+		// 返回基础类型字段
+		return &protobuf.ProtoField{
+			Name: fieldName,
+			Type: protoType,
+		}, nil
 	}
 
-	if len(schema.OneOf) > 0 {
-		var oneofFields []*protobuf.ProtoField
-		for i, oneOfSchema := range schema.OneOf {
-			oneOfFieldMessage, err := c.ConvertSchemaToProtoMessage(oneOfSchema, parentMessageName+"_OneOf"+fmt.Sprint(i))
-			if err != nil {
-				return nil, err
-			}
-			oneofField := &protobuf.ProtoField{
-				Name:     "oneOf" + fmt.Sprint(i),
-				Type:     oneOfFieldMessage.Name,
-				Messages: []*protobuf.ProtoMessage{oneOfFieldMessage}, // 将生成的子消息加到字段的Messages中
-			}
-			oneofFields = append(oneofFields, oneofField)
-			c.addNestedMessageToParent(message, oneOfFieldMessage)
-		}
-		message.Fields = append(message.Fields, &protobuf.ProtoField{
-			Name:  "oneof " + parentMessageName,
-			OneOf: oneofFields,
-		})
-	}
-
-	if len(schema.AllOf) > 0 {
-		var allOfFields []*protobuf.ProtoField
-		for i, allOfSchema := range schema.AllOf {
-			allOfFieldMessage, err := c.ConvertSchemaToProtoMessage(allOfSchema, parentMessageName+"_AllOf"+fmt.Sprint(i))
-			if err != nil {
-				return nil, err
-			}
-			allOfField := &protobuf.ProtoField{
-				Name:     "allOf" + fmt.Sprint(i),
-				Type:     allOfFieldMessage.Name,
-				Messages: []*protobuf.ProtoMessage{allOfFieldMessage}, // 将生成的子消息加到字段的Messages中
-			}
-			allOfFields = append(allOfFields, allOfField)
-			c.addNestedMessageToParent(message, allOfFieldMessage)
-		}
-		message.Fields = append(message.Fields, &protobuf.ProtoField{
-			Name:   "allof " + parentMessageName,
-			Fields: allOfFields,
-		})
-	}
-
-	if len(schema.AnyOf) > 0 {
-		anyOfFields := []*protobuf.ProtoField{}
-		for i, anyOfSchema := range schema.AnyOf {
-			anyOfFieldMessage, err := c.ConvertSchemaToProtoMessage(anyOfSchema, parentMessageName+"_AnyOf"+fmt.Sprint(i))
-			if err != nil {
-				return nil, err
-			}
-			anyOfField := &protobuf.ProtoField{
-				Name:     "anyOf" + fmt.Sprint(i),
-				Type:     anyOfFieldMessage.Name,
-				Messages: []*protobuf.ProtoMessage{anyOfFieldMessage}, // 将生成的子消息加到字段的Messages中
-			}
-			anyOfFields = append(anyOfFields, anyOfField)
-			c.addNestedMessageToParent(message, anyOfFieldMessage)
-		}
-		message.Fields = append(message.Fields, &protobuf.ProtoField{
-			Name:   "anyof " + parentMessageName,
-			Fields: anyOfFields,
-		})
-	}
-
-	return message, nil
+	return nil, fmt.Errorf("unsupported schema type")
 }
 
 // addNestedMessageToParent 将子消息作为嵌套消息添加到父消息中
 func (c *ProtoConverter) addNestedMessageToParent(parentMessage, nestedMessage *protobuf.ProtoMessage) {
 	if parentMessage != nil && nestedMessage != nil {
-		// 将子消息添加到父消息的嵌套消息列表中
 		parentMessage.Messages = append(parentMessage.Messages, nestedMessage)
 	}
 }
@@ -637,12 +552,8 @@ func (c *ProtoConverter) ConvertSchemaToProtoMessage1(schema *openapi3.Schema, n
 				protoMsg.Fields = append(protoMsg.Fields, field)
 			}
 		} else {
-			// 处理非对象类型
-			fieldType, err := c.convertSchemaToProtoType(schema)
-			if err != nil {
-				return nil, err
-			}
-			field := &protobuf.ProtoField{Name: "value", Type: fieldType}
+
+			field, _ := c.convertSchemaToProtoField(name, schema)
 			protoMsg.Fields = append(protoMsg.Fields, field)
 		}
 	}

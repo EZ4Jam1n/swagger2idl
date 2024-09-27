@@ -1,116 +1,248 @@
 syntax = "proto3";
 
-package 简化示例_API;
+package Swagger_Petstore_-_OpenAPI_3.0;
 
+import "google/protobuf/timestamp.proto";
 import "google.protobuf.Empty";
 import "api.proto";
 
-message NewProduct {
-  NewProduct_name name = 1;
-  NewProduct_price price = 2;
-  NewProduct_tags tags = 3;
-  message NewProduct_name {
-    string NewProduct_name = 1;
-  }
-
-  message NewProduct_price {
-    float NewProduct_price = 1;
-  }
-
-  message NewProduct_tags {
-    repeated NewProduct_tagsItem NewProduct_tags = 1;
-    message NewProduct_tagsItem {
-      string NewProduct_tagsItem = 1;
-    }
-
-  }
-
+message Address {
+  string city = 1;
+  string state = 2;
+  string street = 3;
+  string zip = 4;
 }
 
-message Request {
-  string productId = 1;
+message ApiResponse {
+  int32 code = 1;
+  string message = 2;
+  string type = 3;
 }
 
-message Response_200 {
-  repeated Response_200Item Response_200 = 1;
-  Response_200_id id = 2;
-  Response_200_name name = 3;
-  Response_200_price price = 4;
-  Response_200_tags tags = 5;
-  message Response_200_id {
-    string Response_200_id = 1;
-  }
-
-  message Response_200_name {
-    string Response_200_name = 1;
-  }
-
-  message Response_200_price {
-    float Response_200_price = 1;
-  }
-
-  message Response_200_tags {
-    repeated Response_200_tagsItem Response_200_tags = 1;
-    message Response_200_tagsItem {
-      string Response_200_tagsItem = 1;
-    }
-
-  }
-
+message Category {
+  int64 id = 1;
+  string name = 2;
 }
 
-message Response_201 {
-  Response_201_id id = 1;
-  Response_201_name name = 2;
-  Response_201_price price = 3;
-  Response_201_tags tags = 4;
-  message Response_201_name {
-    string Response_201_name = 1;
-  }
-
-  message Response_201_price {
-    float Response_201_price = 1;
-  }
-
-  message Response_201_tags {
-    repeated Response_201_tagsItem Response_201_tags = 1;
-    message Response_201_tagsItem {
-      string Response_201_tagsItem = 1;
-    }
-
-  }
-
-  message Response_201_id {
-    string Response_201_id = 1;
-  }
-
+message Customer {
+  repeated repeated Address address = 1;
+  int64 id = 2;
+  string username = 3;
 }
 
-message UpdateProduct {
-  UpdateProduct_name name = 1;
-  UpdateProduct_price price = 2;
-  message UpdateProduct_name {
-    string UpdateProduct_name = 1;
-  }
-
-  message UpdateProduct_price {
-    float UpdateProduct_price = 1;
-  }
-
+message Order {
+  bool complete = 1;
+  int64 id = 2;
+  int64 petId = 3;
+  int32 quantity = 4;
+  google.protobuf.Timestamp shipDate = 5;
+  string status = 6;
 }
 
-service DefaultService {
-  rpc DeleteMethod(Request) returns (google.protobuf.Empty) {
-     option (api.delete) = "/products/:productId";
+message Pet {
+  Category Category = 1;
+  int64 id = 2;
+  string name = 3;
+  repeated string photoUrls = 4;
+  string status = 5;
+  repeated Tag tags = 6;
+}
+
+message Tag {
+  int64 id = 1;
+  string name = 2;
+}
+
+message User {
+  string email = 1;
+  string firstName = 2;
+  int64 id = 3;
+  string lastName = 4;
+  string password = 5;
+  string phone = 6;
+  int32 userStatus = 7;
+  string username = 8;
+}
+
+message addPet {
+  Pet response_200 = 1;
+}
+
+message addPetRequest {
+  Pet Pet = 1;
+}
+
+message createUserRequest {
+  User User = 1;
+}
+
+message createUsersWithListInputRequest {
+  repeated repeated User createUsersWithListInputRequest = 1;
+}
+
+message deleteOrderRequest {
+  int64 orderId = 1;
+}
+
+message deletePetRequest {
+  string api_key = 1;
+  int64 petId = 2;
+}
+
+message deleteUserRequest {
+  string username = 1;
+}
+
+message findPetsByStatus {
+  findPetsByStatusResponse_200 response_200 = 1;
+}
+
+message findPetsByStatusRequest {
+  string status = 1;
+}
+
+message findPetsByStatusResponse_200 {
+  repeated repeated Pet findPetsByStatusResponse_200 = 1;
+}
+
+message findPetsByTags {
+  findPetsByTagsResponse_200 response_200 = 1;
+}
+
+message findPetsByTagsRequest {
+  repeated repeated string tags = 1;
+}
+
+message findPetsByTagsResponse_200 {
+  repeated repeated Pet findPetsByTagsResponse_200 = 1;
+}
+
+message getInventoryResponse_200 {
+  map<string, string> additionalProperties = 1;
+}
+
+message getOrderByIdRequest {
+  int64 orderId = 1;
+}
+
+message getPetByIdRequest {
+  int64 petId = 1;
+}
+
+message getUserByName {
+  User response_200 = 1;
+}
+
+message getUserByNameRequest {
+  string username = 1;
+}
+
+message loginUser {
+  loginUserResponse_200 response_200 = 1;
+}
+
+message loginUserRequest {
+  string password = 1;
+  string username = 2;
+}
+
+message loginUserResponse_200 {
+  string loginUserResponse_200 = 1;
+}
+
+message placeOrder {
+  Order response_200 = 1;
+}
+
+message placeOrderRequest {
+  Order Order = 1;
+}
+
+message updatePet {
+  Pet response_200 = 1;
+}
+
+message updatePetRequest {
+  Pet Pet = 1;
+}
+
+message updatePetWithFormRequest {
+  string name = 1;
+  int64 petId = 2;
+  string status = 3;
+}
+
+message updateUserRequest {
+  User User = 1;
+}
+
+message uploadFileRequest {
+  string uploadFileRequest = 1;
+}
+
+service pet {
+  rpc addPet(addPetRequest) returns (addPet) {
+     option (api.post) = "/pet";
   }
-  rpc GetMethod(Request) returns (Response_200) {
-     option (api.get) = "/products/:productId";
+  rpc deletePet(deletePetRequest) returns (google.protobuf.Empty) {
+     option (api.delete) = "/pet/:petId";
   }
-  rpc PostMethod() returns (Response_201) {
-     option (api.post) = "/products";
+  rpc findPetsByStatus(findPetsByStatusRequest) returns (findPetsByStatus) {
+     option (api.get) = "/pet/findByStatus";
   }
-  rpc PutMethod(Request) returns (Response_200) {
-     option (api.put) = "/products/:productId";
+  rpc findPetsByTags(findPetsByTagsRequest) returns (findPetsByTags) {
+     option (api.get) = "/pet/findByTags";
+  }
+  rpc getPetById(getPetByIdRequest) returns (google.protobuf.Empty) {
+     option (api.get) = "/pet/:petId";
+  }
+  rpc updatePet(updatePetRequest) returns (updatePet) {
+     option (api.put) = "/pet";
+  }
+  rpc updatePetWithForm(updatePetWithFormRequest) returns (google.protobuf.Empty) {
+     option (api.post) = "/pet/:petId";
+  }
+  rpc uploadFile(uploadFileRequest) returns (ApiResponse) {
+     option (api.post) = "/pet/:petId/uploadImage";
+  }
+}
+
+service store {
+  rpc deleteOrder(deleteOrderRequest) returns (google.protobuf.Empty) {
+     option (api.delete) = "/store/order/:orderId";
+  }
+  rpc getInventory(google.protobuf.Empty) returns (getInventoryResponse_200) {
+     option (api.get) = "/store/inventory";
+  }
+  rpc getOrderById(getOrderByIdRequest) returns (google.protobuf.Empty) {
+     option (api.get) = "/store/order/:orderId";
+  }
+  rpc placeOrder(placeOrderRequest) returns (placeOrder) {
+     option (api.post) = "/store/order";
+  }
+}
+
+service user {
+  rpc createUser(createUserRequest) returns (User) {
+     option (api.post) = "/user";
+  }
+  rpc createUsersWithListInput(createUsersWithListInputRequest) returns (google.protobuf.Empty) {
+     option (api.post) = "/user/createWithList";
+  }
+  rpc deleteUser(deleteUserRequest) returns (google.protobuf.Empty) {
+     option (api.delete) = "/user/:username";
+  }
+  rpc getUserByName(getUserByNameRequest) returns (getUserByName) {
+     option (api.get) = "/user/:username";
+  }
+  rpc loginUser(loginUserRequest) returns (loginUser) {
+     option (api.get) = "/user/login";
+  }
+  rpc logoutUser(google.protobuf.Empty) returns (google.protobuf.Empty) {
+     option (api.get) = "/user/logout";
+  }
+  rpc updateUser(updateUserRequest) returns (google.protobuf.Empty) {
+     option (api.put) = "/user/:username";
   }
 }
 
