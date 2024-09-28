@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	"github.com/swagger-generate/swagger2idl/protobuf"
+	"github.com/swagger-generate/swagger2idl/utils"
 )
 
-// Encoder 用于处理编码的上下文
+// Encoder is used to handle the encoding context
 type Encoder struct {
-	dst *strings.Builder // 输出的目标
+	dst *strings.Builder // The target for output
 }
 
-// ConvertToProtoFile 将 ProtoFile 结构转换为 Proto 文件内容
+// ConvertToProtoFile converts the ProtoFile structure into Proto file content
 func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 	var sb strings.Builder
 	encoder := &Encoder{dst: &sb}
@@ -21,7 +22,7 @@ func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 	encoder.dst.WriteString(fmt.Sprintf("syntax = \"proto3\";\n\n"))
 	encoder.dst.WriteString(fmt.Sprintf("package %s;\n\n", protoFile.PackageName))
 
-	// 生成 imports
+	// Generate imports
 	for _, importFile := range protoFile.Imports {
 		encoder.dst.WriteString(fmt.Sprintf("import \"%s\";\n", importFile))
 	}
@@ -29,34 +30,34 @@ func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 		encoder.dst.WriteString("\n")
 	}
 
-	// 生成文件级别的选项
+	// Generate file-level options
 	for key, value := range protoFile.Options {
-		encoder.dst.WriteString(fmt.Sprintf("option %s = %s;\n", key, Stringify(value)))
+		encoder.dst.WriteString(fmt.Sprintf("option %s = %s;\n", key, utils.Stringify(value)))
 	}
 	if len(protoFile.Options) > 0 {
 		encoder.dst.WriteString("\n")
 	}
 
-	// 对消息按名称排序
+	// Sort messages by name
 	sort.Slice(protoFile.Messages, func(i, j int) bool {
 		return protoFile.Messages[i].Name < protoFile.Messages[j].Name
 	})
 
-	// 生成消息
+	// Generate messages
 	for _, message := range protoFile.Messages {
 		encoder.encodeMessage(message, 0)
 	}
 
-	// 对服务按名称排序
+	// Sort services by name
 	sort.Slice(protoFile.Services, func(i, j int) bool {
 		return protoFile.Services[i].Name < protoFile.Services[j].Name
 	})
 
-	// 生成服务
+	// Generate services
 	for _, service := range protoFile.Services {
 		encoder.dst.WriteString(fmt.Sprintf("service %s {\n", service.Name))
 
-		// 对方法按名称排序
+		// Sort methods by name
 		sort.Slice(service.Methods, func(i, j int) bool {
 			return service.Methods[i].Name < service.Methods[j].Name
 		})
@@ -81,12 +82,12 @@ func ConvertToProtoFile(protoFile *protobuf.ProtoFile) string {
 	return encoder.dst.String()
 }
 
-// encodeMessage 递归编码消息，并处理嵌套的消息和枚举
+// encodeMessage recursively encodes messages, including nested messages and enums
 func (e *Encoder) encodeMessage(message *protobuf.ProtoMessage, indentLevel int) {
 	indent := strings.Repeat("  ", indentLevel)
 	e.dst.WriteString(fmt.Sprintf("%smessage %s {\n", indent, message.Name))
 
-	// 生成消息级别选项
+	// Generate message-level options
 	if len(message.Options) > 0 {
 		e.dst.WriteString(fmt.Sprintf("%s  option", indent))
 		for _, option := range message.Options {
@@ -95,12 +96,12 @@ func (e *Encoder) encodeMessage(message *protobuf.ProtoMessage, indentLevel int)
 		}
 	}
 
-	// 对字段按名称排序
+	// Sort fields by name
 	sort.Slice(message.Fields, func(i, j int) bool {
 		return message.Fields[i].Name < message.Fields[j].Name
 	})
 
-	// 生成字段
+	// Generate fields
 	for i, field := range message.Fields {
 		repeated := ""
 		if field.Repeated {
@@ -108,7 +109,7 @@ func (e *Encoder) encodeMessage(message *protobuf.ProtoMessage, indentLevel int)
 		}
 		e.dst.WriteString(fmt.Sprintf("%s  %s%s %s = %d", indent, repeated, field.Type, field.Name, i+1))
 
-		// 生成字段级别的选项
+		// Generate field-level options
 		if len(field.Options) > 0 {
 			e.dst.WriteString(" [\n    ")
 			for j, option := range field.Options {
@@ -122,72 +123,50 @@ func (e *Encoder) encodeMessage(message *protobuf.ProtoMessage, indentLevel int)
 		e.dst.WriteString(";\n")
 	}
 
-	// 递归处理嵌套的消息
+	// Recursively handle nested messages
 	for _, nestedMessage := range message.Messages {
-		e.encodeMessage(nestedMessage, indentLevel+1) // 缩进增加
+		e.encodeMessage(nestedMessage, indentLevel+1) // Increase indentation
 	}
 
 	e.dst.WriteString(fmt.Sprintf("%s}\n\n", indent))
 }
 
-// encodeFieldOption 编码单个字段的 option
+// encodeFieldOption encodes an option for a single field
 func (e *Encoder) encodeFieldOption(opt *protobuf.Option) error {
-	// 输出 option 的名称
-	fmt.Fprintf(e.dst, "(%s) = ", opt.Name) // 增加缩进，保持一致
+	// Output the option name
+	fmt.Fprintf(e.dst, "(%s) = ", opt.Name) // Add indentation for consistency
 
-	// 判断 option 的值是否是一个复杂结构
+	// Check if the option value is a complex structure
 	switch value := opt.Value.(type) {
 	case map[string]interface{}:
-		// 如果是 map 类型，表示需要嵌套输出
-		fmt.Fprintf(e.dst, "{\n")        // 在 { 后换行
-		e.encodeFieldOptionMap(value, 6) // 输出 map 内容，传递当前缩进层次
-		fmt.Fprintf(e.dst, "    }")      // 缩进并输出结束的 }，根据缩进层次决定缩进量
+		// If it's a map type, it needs to output as a nested structure
+		fmt.Fprintf(e.dst, "{\n")        // Newline after {
+		e.encodeFieldOptionMap(value, 6) // Output map content, passing the current indentation level
+		fmt.Fprintf(e.dst, "    }")      // Indent and output the closing }, with the appropriate indentation level
 	default:
-		fmt.Fprintf(e.dst, "%s", value) // 对于简单类型，直接输出
+		fmt.Fprintf(e.dst, "%s", value) // For simple types, output directly
 	}
 
 	return nil
 }
 
-// encodeFieldOptionMap 编码复杂的 map 类型的 option 值
+// encodeFieldOptionMap encodes a complex map type option value
 func (e *Encoder) encodeFieldOptionMap(optionMap map[string]interface{}, indent int) error {
 	keys := make([]string, 0, len(optionMap))
 	for k := range optionMap {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys) // 对键进行排序，确保输出顺序一致
+	sort.Strings(keys) // Sort keys to ensure consistent output order
 
-	indentSpace := strings.Repeat(" ", indent) // 动态生成缩进空格
+	indentSpace := strings.Repeat(" ", indent) // Dynamically generate indent spaces
 
 	for _, key := range keys {
 		value := optionMap[key]
-		// 输出键值对，适当缩进
-		fmt.Fprintf(e.dst, "%s%s: %s", indentSpace, key, Stringify(value)) // 增加更深的缩进
-		// 不在最后一项后面加分号，保持正确格式
+		// Output key-value pairs with appropriate indentation
+		fmt.Fprintf(e.dst, "%s%s: %s", indentSpace, key, utils.Stringify(value)) // Add deeper indentation
+		// Don't add a semicolon after the last item, maintain correct format
 		fmt.Fprintf(e.dst, ";\n")
 	}
 
 	return nil
-}
-
-func Stringify(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		return fmt.Sprintf("%q", v) // 对字符串加引号
-	case int, int64, float64:
-		return fmt.Sprintf("%v", v) // 对数字直接输出
-	case *uint64:
-		return fmt.Sprintf("%d", *v) // 处理 *uint64 类型指针
-	case []string:
-		return fmt.Sprintf("[%s]", strings.Join(v, ", ")) // 对字符串数组输出为列表形式
-	case []interface{}:
-		// 处理任意类型的数组
-		var strValues []string
-		for _, item := range v {
-			strValues = append(strValues, Stringify(item))
-		}
-		return fmt.Sprintf("[%s]", strings.Join(strValues, ", "))
-	default:
-		return fmt.Sprintf("%v", v) // 其他类型直接转为字符串
-	}
 }

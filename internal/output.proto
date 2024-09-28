@@ -1,248 +1,74 @@
 syntax = "proto3";
 
-package Swagger_Petstore_-_OpenAPI_3.0;
+package example_swagger_doc;
 
-import "google/protobuf/timestamp.proto";
-import "google.protobuf.Empty";
 import "api.proto";
 
-message Address {
-  string city = 1;
-  string state = 2;
-  string street = 3;
-  string zip = 4;
+message HelloRespBody {
+  string body = 1;
 }
 
-message ApiResponse {
-  int32 code = 1;
-  string message = 2;
-  string type = 3;
-}
-
-message Category {
-  int64 id = 1;
-  string name = 2;
-}
-
-message Customer {
-  repeated repeated Address address = 1;
-  int64 id = 2;
-  string username = 3;
-}
-
-message Order {
-  bool complete = 1;
-  int64 id = 2;
-  int64 petId = 3;
-  int32 quantity = 4;
-  google.protobuf.Timestamp shipDate = 5;
-  string status = 6;
-}
-
-message Pet {
-  Category Category = 1;
-  int64 id = 2;
-  string name = 3;
-  repeated string photoUrls = 4;
-  string status = 5;
-  repeated Tag tags = 6;
-}
-
-message Tag {
-  int64 id = 1;
-  string name = 2;
-}
-
-message User {
-  string email = 1;
-  string firstName = 2;
-  int64 id = 3;
-  string lastName = 4;
-  string password = 5;
-  string phone = 6;
-  int32 userStatus = 7;
-  string username = 8;
-}
-
-message addPet {
-  Pet response_200 = 1;
-}
-
-message addPetRequest {
-  Pet Pet = 1;
-}
-
-message createUserRequest {
-  User User = 1;
-}
-
-message createUsersWithListInputRequest {
-  repeated repeated User createUsersWithListInputRequest = 1;
-}
-
-message deleteOrderRequest {
-  int64 orderId = 1;
-}
-
-message deletePetRequest {
-  string api_key = 1;
-  int64 petId = 2;
-}
-
-message deleteUserRequest {
-  string username = 1;
-}
-
-message findPetsByStatus {
-  findPetsByStatusResponse_200 response_200 = 1;
-}
-
-message findPetsByStatusRequest {
-  string status = 1;
-}
-
-message findPetsByStatusResponse_200 {
-  repeated repeated Pet findPetsByStatusResponse_200 = 1;
-}
-
-message findPetsByTags {
-  findPetsByTagsResponse_200 response_200 = 1;
-}
-
-message findPetsByTagsRequest {
-  repeated repeated string tags = 1;
-}
-
-message findPetsByTagsResponse_200 {
-  repeated repeated Pet findPetsByTagsResponse_200 = 1;
-}
-
-message getInventoryResponse_200 {
-  map<string, string> additionalProperties = 1;
-}
-
-message getOrderByIdRequest {
-  int64 orderId = 1;
-}
-
-message getPetByIdRequest {
-  int64 petId = 1;
-}
-
-message getUserByName {
-  User response_200 = 1;
-}
-
-message getUserByNameRequest {
-  string username = 1;
-}
-
-message loginUser {
-  loginUserResponse_200 response_200 = 1;
-}
-
-message loginUserRequest {
-  string password = 1;
-  string username = 2;
-}
-
-message loginUserResponse_200 {
-  string loginUserResponse_200 = 1;
-}
-
-message placeOrder {
-  Order response_200 = 1;
-}
-
-message placeOrderRequest {
-  Order Order = 1;
-}
-
-message updatePet {
-  Pet response_200 = 1;
-}
-
-message updatePetRequest {
-  Pet Pet = 1;
-}
-
-message updatePetWithFormRequest {
-  string name = 1;
-  int64 petId = 2;
-  string status = 3;
-}
-
-message updateUserRequest {
-  User User = 1;
-}
-
-message uploadFileRequest {
-  string uploadFileRequest = 1;
-}
-
-service pet {
-  rpc addPet(addPetRequest) returns (addPet) {
-     option (api.post) = "/pet";
+message HelloService1_BodyMethodRequest {
+  string query2 = 1;
+  message HelloService1BodyMethodRequestapplicationjson {
+    string body = 1;
+    string body1 = 2;
   }
-  rpc deletePet(deletePetRequest) returns (google.protobuf.Empty) {
-     option (api.delete) = "/pet/:petId";
-  }
-  rpc findPetsByStatus(findPetsByStatusRequest) returns (findPetsByStatus) {
-     option (api.get) = "/pet/findByStatus";
-  }
-  rpc findPetsByTags(findPetsByTagsRequest) returns (findPetsByTags) {
-     option (api.get) = "/pet/findByTags";
-  }
-  rpc getPetById(getPetByIdRequest) returns (google.protobuf.Empty) {
-     option (api.get) = "/pet/:petId";
-  }
-  rpc updatePet(updatePetRequest) returns (updatePet) {
-     option (api.put) = "/pet";
-  }
-  rpc updatePetWithForm(updatePetWithFormRequest) returns (google.protobuf.Empty) {
-     option (api.post) = "/pet/:petId";
-  }
-  rpc uploadFile(uploadFileRequest) returns (ApiResponse) {
-     option (api.post) = "/pet/:petId/uploadImage";
-  }
+
 }
 
-service store {
-  rpc deleteOrder(deleteOrderRequest) returns (google.protobuf.Empty) {
-     option (api.delete) = "/store/order/:orderId";
-  }
-  rpc getInventory(google.protobuf.Empty) returns (getInventoryResponse_200) {
-     option (api.get) = "/store/inventory";
-  }
-  rpc getOrderById(getOrderByIdRequest) returns (google.protobuf.Empty) {
-     option (api.get) = "/store/order/:orderId";
-  }
-  rpc placeOrder(placeOrderRequest) returns (placeOrder) {
-     option (api.post) = "/store/order";
-  }
+message HelloService1_BodyMethodResponse_200 {
+  HelloRespBody HelloRespBody = 1;
+  string token = 2;
 }
 
-service user {
-  rpc createUser(createUserRequest) returns (User) {
-     option (api.post) = "/user";
+message HelloService1_FormMethodRequest {
+  message HelloService1FormMethodRequestapplicationxWwwFormUrlencoded {
+    string form1 = 1;
   }
-  rpc createUsersWithListInput(createUsersWithListInputRequest) returns (google.protobuf.Empty) {
-     option (api.post) = "/user/createWithList";
+
+  message HelloService1FormMethodRequestmultipartformData {
+    string form1 = 1;
   }
-  rpc deleteUser(deleteUserRequest) returns (google.protobuf.Empty) {
-     option (api.delete) = "/user/:username";
+
+}
+
+message HelloService1_FormMethodResponse_200 {
+  HelloRespBody HelloRespBody = 1;
+  string token = 2;
+}
+
+message HelloService1_PathMethodRequest {
+  string path1 = 1;
+}
+
+message HelloService1_PathMethodResponse_200 {
+  HelloRespBody HelloRespBody = 1;
+  string token = 2;
+}
+
+message HelloService1_QueryMethod1Request {
+  repeated string items = 1;
+  string query2 = 2;
+}
+
+message HelloService1_QueryMethod1Response_200 {
+  HelloRespBody HelloRespBody = 1;
+  string token = 2;
+}
+
+service HelloService1 {
+  rpc HelloService1_BodyMethod(HelloService1_BodyMethodRequest) returns (HelloService1_BodyMethodResponse_200) {
+     option (api.post) = "/body";
   }
-  rpc getUserByName(getUserByNameRequest) returns (getUserByName) {
-     option (api.get) = "/user/:username";
+  rpc HelloService1_FormMethod(HelloService1_FormMethodRequest) returns (HelloService1_FormMethodResponse_200) {
+     option (api.post) = "/form";
   }
-  rpc loginUser(loginUserRequest) returns (loginUser) {
-     option (api.get) = "/user/login";
+  rpc HelloService1_PathMethod(HelloService1_PathMethodRequest) returns (HelloService1_PathMethodResponse_200) {
+     option (api.get) = "/path:path1";
   }
-  rpc logoutUser(google.protobuf.Empty) returns (google.protobuf.Empty) {
-     option (api.get) = "/user/logout";
-  }
-  rpc updateUser(updateUserRequest) returns (google.protobuf.Empty) {
-     option (api.put) = "/user/:username";
+  rpc HelloService1_QueryMethod1(HelloService1_QueryMethod1Request) returns (HelloService1_QueryMethod1Response_200) {
+     option (api.get) = "/hello";
   }
 }
 

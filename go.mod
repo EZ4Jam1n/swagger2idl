@@ -1,8 +1,11 @@
 module github.com/swagger-generate/swagger2idl
 
-go 1.22.0
+go 1.18
 
-require github.com/getkin/kin-openapi v0.127.0
+require (
+	github.com/getkin/kin-openapi v0.127.0
+	github.com/iancoleman/strcase v0.3.0
+)
 
 require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect

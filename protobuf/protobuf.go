@@ -1,66 +1,66 @@
 package protobuf
 
-// ProtoFile 代表一个完整的 Proto 文件
+// ProtoFile represents a complete Proto file
 type ProtoFile struct {
-	PackageName string            // Proto 文件的包名
-	Messages    []*ProtoMessage   // Proto 消息
-	Services    []*ProtoService   // Proto 服务
-	Enums       []*ProtoEnum      // Proto 枚举
-	Imports     []string          // 引用的其他 Proto 文件
-	Options     map[string]string // 文件级别的选项
+	PackageName string            // The package name of the Proto file
+	Messages    []*ProtoMessage   // List of Proto messages
+	Services    []*ProtoService   // List of Proto services
+	Enums       []*ProtoEnum      // List of Proto enums
+	Imports     []string          // List of imported Proto files
+	Options     map[string]string // File-level options
 }
 
-// ProtoMessage 代表一个 Proto 消息
+// ProtoMessage represents a Proto message
 type ProtoMessage struct {
 	Name     string
-	Fields   []*ProtoField
-	Messages []*ProtoMessage // Proto 消息
-	Enums    []*ProtoEnum    // Proto 枚举
-	Options  []*Option
+	Fields   []*ProtoField   // List of fields in the Proto message
+	Messages []*ProtoMessage // Nested Proto messages
+	Enums    []*ProtoEnum    // Enums within the Proto message
+	Options  []*Option       // Options specific to this Proto message
 }
 
-// ProtoField 代表一个 Proto 字段
+// ProtoField represents a field in a Proto message
 type ProtoField struct {
 	Name     string
 	Type     string
-	Repeated bool
-	OneOf    []*ProtoField   // oneof 字段集合，用于表示 oneOf 类型
-	Fields   []*ProtoField   // 嵌套字段集合（例如对象类型）
-	Messages []*ProtoMessage // Proto 消息
-	Enums    []*ProtoEnum    // Proto 枚举
-	Options  []*Option       // 新增 options 字段
+	Repeated bool            // Indicates if the field is repeated (array)
+	OneOf    []*ProtoField   // Collection of oneof fields (for representing oneOf types)
+	Fields   []*ProtoField   // Nested fields (for object types)
+	Messages []*ProtoMessage // Nested Proto messages within the field
+	Enums    []*ProtoEnum    // Nested enums within the field
+	Options  []*Option       // Additional options for this field
 }
 
-// Option 代表 Proto 字段的选项
+// Option represents an option in a Proto field or message
 type Option struct {
 	Name  string
 	Value interface{}
 }
 
-// ProtoMethod 代表一个 Proto 方法
+// ProtoMethod represents a method in a Proto service
 type ProtoMethod struct {
 	Name    string
-	Input   string // 输入消息类型
-	Output  string // 输出消息类型
-	Options []*Option
+	Input   string    // Input message type
+	Output  string    // Output message type
+	Options []*Option // Options for the method
 }
 
-// ProtoService 代表一个 Proto 服务
+// ProtoService represents a Proto service
 type ProtoService struct {
-	Name    string
-	Methods []*ProtoMethod
-	Options []*Option
+	Name    string         // Name of the service
+	Methods []*ProtoMethod // List of methods in the service
+	Options []*Option      // Service-level options
 }
 
-// ProtoEnum 代表一个 Proto 枚举
+// ProtoEnum represents a Proto enum
 type ProtoEnum struct {
-	Name    string            // 枚举名称
-	Values  []*ProtoEnumValue // 枚举值
-	Options []*Option
+	Name    string            // Name of the enum
+	Values  []*ProtoEnumValue // Values within the enum
+	Options []*Option         // Enum-level options
 }
 
-// ProtoEnumValue 代表一个 Proto 枚举值
+// ProtoEnumValue represents a value in a Proto enum
 type ProtoEnumValue struct {
-	Name  string // 枚举值名称
-	Value int32  // 枚举值对应的整数值
+	Name  string // Name of the enum value
+	Value int32  // Corresponding integer value for the enum
 }
