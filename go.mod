@@ -1,4 +1,4 @@
-module github.com/swagger-generate/swagger2idl
+module github.com/hertz-contrib/swagger-generate/swagger2idl
 
 go 1.18
 

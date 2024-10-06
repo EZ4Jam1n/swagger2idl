@@ -5,69 +5,105 @@ package example_swagger_doc;
 import "api.proto";
 
 message HelloRespBody {
-  string body = 1;
+  string Body = 1;
 }
 
-message HelloService1_BodyMethodRequest {
-  string query2 = 1;
-  message HelloService1BodyMethodRequestapplicationjson {
-    string body = 1;
-    string body1 = 2;
+message HelloService1BodyMethodRequest {
+  HelloService1BodyMethodRequestApplicationJson Applicationjson = 1 [
+    (api.body) = "HelloService1BodyMethodRequestApplicationJson"
+  ];
+  string Query2 = 2 [
+    (api.query) = "query2"
+  ];
+
+  message HelloService1BodyMethodRequestApplicationJson {
+    string Body = 1;
+    string Body1 = 2;
   }
 
 }
 
-message HelloService1_BodyMethodResponse_200 {
-  HelloRespBody HelloRespBody = 1;
-  string token = 2;
+message HelloService1BodyMethodResponse200 {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody"
+  ];
+  string Token = 2 [
+    (api.header) = "token"
+  ];
 }
 
-message HelloService1_FormMethodRequest {
-  message HelloService1FormMethodRequestapplicationxWwwFormUrlencoded {
-    string form1 = 1;
+message HelloService1FormMethodRequest {
+  HelloService1FormMethodRequestApplicationXWwwFormUrlencoded ApplicationxWwwFormUrlencoded = 1 [
+    (api.form) = "HelloService1FormMethodRequestApplicationXWwwFormUrlencoded"
+  ];
+  HelloService1FormMethodRequestMultipartFormData MultipartformData = 2 [
+    (api.form) = "HelloService1FormMethodRequestMultipartFormData"
+  ];
+
+  message HelloService1FormMethodRequestMultipartFormData {
+    string Form1 = 1;
   }
 
-  message HelloService1FormMethodRequestmultipartformData {
-    string form1 = 1;
+
+  message HelloService1FormMethodRequestApplicationXWwwFormUrlencoded {
+    string Form1 = 1;
   }
 
 }
 
-message HelloService1_FormMethodResponse_200 {
-  HelloRespBody HelloRespBody = 1;
-  string token = 2;
+message HelloService1FormMethodResponse200 {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody"
+  ];
+  string Token = 2 [
+    (api.header) = "token"
+  ];
 }
 
-message HelloService1_PathMethodRequest {
-  string path1 = 1;
+message HelloService1PathMethodRequest {
+  string Path1 = 1 [
+    (api.path) = "path1"
+  ];
 }
 
-message HelloService1_PathMethodResponse_200 {
-  HelloRespBody HelloRespBody = 1;
-  string token = 2;
+message HelloService1PathMethodResponse200 {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody"
+  ];
+  string Token = 2 [
+    (api.header) = "token"
+  ];
 }
 
-message HelloService1_QueryMethod1Request {
-  repeated string items = 1;
-  string query2 = 2;
+message HelloService1QueryMethod1Request {
+  repeated string Items = 1 [
+    (api.query) = "items"
+  ];
+  string Query2 = 2 [
+    (api.query) = "query2"
+  ];
 }
 
-message HelloService1_QueryMethod1Response_200 {
-  HelloRespBody HelloRespBody = 1;
-  string token = 2;
+message HelloService1QueryMethod1Response200 {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody"
+  ];
+  string Token = 2 [
+    (api.header) = "token"
+  ];
 }
 
 service HelloService1 {
-  rpc HelloService1_BodyMethod(HelloService1_BodyMethodRequest) returns (HelloService1_BodyMethodResponse_200) {
+  rpc HelloService1BodyMethod(HelloService1BodyMethodRequest) returns (HelloService1BodyMethodResponse200) {
      option (api.post) = "/body";
   }
-  rpc HelloService1_FormMethod(HelloService1_FormMethodRequest) returns (HelloService1_FormMethodResponse_200) {
+  rpc HelloService1FormMethod(HelloService1FormMethodRequest) returns (HelloService1FormMethodResponse200) {
      option (api.post) = "/form";
   }
-  rpc HelloService1_PathMethod(HelloService1_PathMethodRequest) returns (HelloService1_PathMethodResponse_200) {
+  rpc HelloService1PathMethod(HelloService1PathMethodRequest) returns (HelloService1PathMethodResponse200) {
      option (api.get) = "/path:path1";
   }
-  rpc HelloService1_QueryMethod1(HelloService1_QueryMethod1Request) returns (HelloService1_QueryMethod1Response_200) {
+  rpc HelloService1QueryMethod1(HelloService1QueryMethod1Request) returns (HelloService1QueryMethod1Response200) {
      option (api.get) = "/hello";
   }
 }

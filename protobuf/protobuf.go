@@ -1,13 +1,29 @@
+/*
+ * Copyright 2024 CloudWeGo Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package protobuf
 
 // ProtoFile represents a complete Proto file
 type ProtoFile struct {
-	PackageName string            // The package name of the Proto file
-	Messages    []*ProtoMessage   // List of Proto messages
-	Services    []*ProtoService   // List of Proto services
-	Enums       []*ProtoEnum      // List of Proto enums
-	Imports     []string          // List of imported Proto files
-	Options     map[string]string // File-level options
+	PackageName string          // The package name of the Proto file
+	Messages    []*ProtoMessage // List of Proto messages
+	Services    []*ProtoService // List of Proto services
+	Enums       []*ProtoEnum    // List of Proto enums
+	Imports     []string        // List of imported Proto files
+	Options     []*Option       // File-level options
 }
 
 // ProtoMessage represents a Proto message
@@ -61,6 +77,6 @@ type ProtoEnum struct {
 
 // ProtoEnumValue represents a value in a Proto enum
 type ProtoEnumValue struct {
-	Name  string // Name of the enum value
-	Value int32  // Corresponding integer value for the enum
+	Index int // index of the enum value
+	Value any // Corresponding integer value for the enum
 }

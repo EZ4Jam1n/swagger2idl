@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/swagger-generate/swagger2idl/protobuf"
-	"github.com/swagger-generate/swagger2idl/utils"
+	"github.com/hertz-contrib/swagger-generate/swagger2idl/protobuf"
+	"github.com/hertz-contrib/swagger-generate/swagger2idl/utils"
 )
 
 // ProtoConverter struct, used to convert OpenAPI specifications into Proto files
 type ProtoConverter struct {
+	spec            *openapi3.T
 	ProtoFile       *protobuf.ProtoFile
 	converterOption *ConvertOption
 }
@@ -19,51 +20,90 @@ type ProtoConverter struct {
 type ConvertOption struct {
 	openapiOption bool
 	apiOption     bool
+	namingOption  bool
 }
 
 const (
 	apiProtoFile     = "api.proto"
-	openapiProtoFile = "openapi.proto"
-	EmptyProtoFile   = "google.protobuf.empty"
+	openapiProtoFile = "openapi/annotations.proto"
+	EmptyProtoFile   = "google/protobuf/empty.proto"
+
+	EmptyMessage           = "google.protobuf.Empty"
+	openapiDocumentOption  = "openapi.document"
+	openapiOperationOption = "openapi.operation"
+	openapiPropertyOption  = "openapi.property"
+	openapiSchemaOption    = "openapi.schema"
+)
+
+var (
+	methodToOption = map[string]string{
+		"GET":     "api.get",
+		"POST":    "api.post",
+		"PUT":     "api.put",
+		"PATCH":   "api.patch",
+		"DELETE":  "api.delete",
+		"HEAD":    "api.head",
+		"OPTIONS": "api.options",
+	}
 )
 
 // NewProtoConverter creates and initializes a ProtoConverter
-func NewProtoConverter(packageName string) *ProtoConverter {
+func NewProtoConverter(spec *openapi3.T) *ProtoConverter {
 	return &ProtoConverter{
+		spec: spec,
 		ProtoFile: &protobuf.ProtoFile{
-			PackageName: packageName,
+			PackageName: utils.GetPackageName(spec),
 			Messages:    []*protobuf.ProtoMessage{},
 			Services:    []*protobuf.ProtoService{},
+			Enums:       []*protobuf.ProtoEnum{},
+			Imports:     []string{},
+			Options:     []*protobuf.Option{},
 		},
 		converterOption: &ConvertOption{
 			openapiOption: false,
 			apiOption:     true,
+			namingOption:  true,
 		},
 	}
 }
 
 // Convert converts the OpenAPI specification to a Proto file
-func (c *ProtoConverter) Convert(spec *openapi3.T) error {
+func (c *ProtoConverter) Convert() error {
+
+	// Convert the go Option to Proto
 
 	// Convert components into Proto messages
-	err := c.convertComponentsToProtoMessages(spec.Components)
+	err := c.convertComponentsToProtoMessages(c.spec.Components)
 	if err != nil {
 		return fmt.Errorf("error converting components to proto messages: %w", err)
 	}
 
 	// Convert paths into Proto services
-	err = c.convertPathsToProtoServices(spec.Paths)
+	err = c.convertPathsToProtoServices(c.spec.Paths)
 	if err != nil {
 		return fmt.Errorf("error converting paths to proto services: %w", err)
 	}
 
 	if c.converterOption.openapiOption {
-		c.AddProtoImport(openapiProtoFile)
-	}
-	if c.converterOption.apiOption {
-		c.AddProtoImport(apiProtoFile)
+		err = c.addOptionsToProto(c.spec)
+		if err != nil {
+			return fmt.Errorf("error parse options to proto: %w", err)
+		}
 	}
 
+	return nil
+}
+
+// addOptionsToProto adds options to the ProtoFile
+func (c *ProtoConverter) addOptionsToProto(spec *openapi3.T) error {
+	optionStr := utils.StructToProtobuf(spec, "     ")
+
+	schemaOption := &protobuf.Option{
+		Name:  openapiDocumentOption,
+		Value: optionStr,
+	}
+	c.ProtoFile.Options = append(c.ProtoFile.Options, schemaOption)
+	c.AddProtoImport(openapiProtoFile)
 	return nil
 }
 
@@ -77,7 +117,7 @@ func (c *ProtoConverter) convertComponentsToProtoMessages(components *openapi3.C
 	}
 	for name, schemaRef := range components.Schemas {
 		schema := schemaRef
-		fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema, name, nil)
+		fieldOrMessage, err := c.ConvertSchemaToProtoType(schema, name, nil)
 		if err != nil {
 			return fmt.Errorf("error converting schema %s: %w", name, err)
 		}
@@ -87,9 +127,45 @@ func (c *ProtoConverter) convertComponentsToProtoMessages(components *openapi3.C
 				Name:   name,
 				Fields: []*protobuf.ProtoField{v},
 			}
+
+			if c.converterOption.openapiOption {
+				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+
+				schemaOption := &protobuf.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				message.Options = append(message.Options, schemaOption)
+				c.AddProtoImport(openapiProtoFile)
+
+			}
 			c.addMessageToProto(message)
 		case *protobuf.ProtoMessage:
+			if c.converterOption.openapiOption {
+				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+
+				schemaOption := &protobuf.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				v.Options = append(v.Options, schemaOption)
+				c.AddProtoImport(openapiProtoFile)
+
+			}
 			c.addMessageToProto(v)
+		case *protobuf.ProtoEnum:
+			if c.converterOption.openapiOption {
+				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+
+				schemaOption := &protobuf.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				v.Options = append(v.Options, schemaOption)
+				c.AddProtoImport(openapiProtoFile)
+
+			}
+			c.addEnumToProto(v)
 		}
 	}
 	return nil
@@ -110,19 +186,17 @@ func (c *ProtoConverter) convertPathsToProtoServices(paths *openapi3.Paths) erro
 func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*protobuf.ProtoService, error) {
 	var services []*protobuf.ProtoService
 
-	methodToOption := map[string]string{
-		"GET":    "api.get",
-		"POST":   "api.post",
-		"PUT":    "api.put",
-		"PATCH":  "api.patch",
-		"DELETE": "api.delete",
-	}
-
 	for path, pathItem := range paths.Map() {
 		for method, operation := range pathItem.Operations() {
 			serviceName := utils.GetServiceName(operation.Tags)
 
-			methodName := utils.GenerateMethodName(operation.OperationID, method)
+			methodName := utils.GenerateMethodName(operation, method)
+
+			if c.converterOption.namingOption {
+				methodName = utils.ToPascaleCase(methodName)
+			} else {
+				methodName = utils.ToUpperFirstLetter(methodName)
+			}
 
 			inputMessage, err := c.generateRequestMessage(operation)
 			if err != nil {
@@ -144,24 +218,25 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 				}
 
 				if c.converterOption.apiOption {
-
 					if optionName, ok := methodToOption[method]; ok {
 						option := &protobuf.Option{
 							Name:  optionName,
 							Value: fmt.Sprintf("%q", utils.ConvertPath(path)),
 						}
 						protoMethod.Options = append(protoMethod.Options, option)
+						c.AddProtoImport(apiProtoFile)
 					}
 				}
 
 				if c.converterOption.openapiOption {
-					optionStr := utils.StructToProtobuf(operation, "  ")
+					optionStr := utils.StructToProtobuf(operation, "     ")
 
 					schemaOption := &protobuf.Option{
-						Name:  "openapi.operation",
+						Name:  openapiOperationOption,
 						Value: optionStr,
 					}
 					protoMethod.Options = append(protoMethod.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
 
 				}
 				service.Methods = append(service.Methods, protoMethod)
@@ -175,11 +250,16 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 // generateRequestMessage generates a request message for an operation
 func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (string, error) {
 	messageName := operation.OperationID + "Request"
+	if c.converterOption.namingOption {
+		messageName = utils.ToPascaleCase(messageName)
+	} else {
+		messageName = utils.ToUpperFirstLetter(messageName)
+	}
 	message := &protobuf.ProtoMessage{Name: messageName}
 
 	if operation.RequestBody == nil && len(operation.Parameters) == 0 {
 		c.AddProtoImport(EmptyProtoFile)
-		return EmptyProtoFile, nil
+		return EmptyMessage, nil
 	}
 
 	if operation.RequestBody != nil {
@@ -191,16 +271,115 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (
 			for mediaTypeStr, mediaType := range operation.RequestBody.Value.Content {
 				schema := mediaType.Schema
 				if schema != nil {
-					fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema, utils.SanitizeName(messageName+mediaTypeStr), message)
+					protoType, err := c.ConvertSchemaToProtoType(schema, utils.FormatNaming(mediaTypeStr), message)
 					if err != nil {
 						return "", err
 					}
 
-					switch v := fieldOrMessage.(type) {
+					switch v := protoType.(type) {
 					case *protobuf.ProtoField:
+						if c.converterOption.apiOption {
+							var optionName string
+							if mediaTypeStr == "application/json" {
+								optionName = "api.body"
+							} else if mediaTypeStr == "application/x-www-form-urlencoded" || mediaTypeStr == "multipart/form-data" {
+								optionName = "api.form"
+							}
+							if optionName != "" {
+								v.Options = append(v.Options, &protobuf.Option{
+									Name:  optionName,
+									Value: fmt.Sprintf("%q", v.Name),
+								})
+								c.AddProtoImport(apiProtoFile)
+							}
+						}
+						if c.converterOption.openapiOption {
+							optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+							schemaOption := &protobuf.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							v.Options = append(v.Options, schemaOption)
+							c.AddProtoImport(openapiProtoFile)
+						}
 						addFieldIfNotExists(&message.Fields, v)
 					case *protobuf.ProtoMessage:
+						name := mediaTypeStr
+						if c.converterOption.namingOption {
+							name = utils.ToPascaleCase(name)
+						} else {
+							name = utils.FormatNaming(name)
+						}
+						newField := &protobuf.ProtoField{
+							Name: name,
+							Type: v.Name,
+						}
+						if c.converterOption.apiOption {
+							var optionName string
+							if mediaTypeStr == "application/json" {
+								optionName = "api.body"
+							} else if mediaTypeStr == "application/x-www-form-urlencoded" || mediaTypeStr == "multipart/form-data" {
+								optionName = "api.form"
+							}
+							if optionName != "" {
+								newField.Options = append(newField.Options, &protobuf.Option{
+									Name:  optionName,
+									Value: fmt.Sprintf("%q", v.Name),
+								})
+								c.AddProtoImport(apiProtoFile)
+							}
+						}
+						if c.converterOption.openapiOption {
+							optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+							schemaOption := &protobuf.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							newField.Options = append(newField.Options, schemaOption)
+							c.AddProtoImport(openapiProtoFile)
+						}
 						addMessageIfNotExists(&message.Messages, v)
+						message.Fields = append(message.Fields, newField)
+					case *protobuf.ProtoEnum:
+						name := mediaTypeStr
+						if c.converterOption.namingOption {
+							name = utils.ToPascaleCase(name)
+						} else {
+							name = utils.FormatNaming(name)
+						}
+						newField := &protobuf.ProtoField{
+							Name: name,
+							Type: v.Name,
+						}
+						if c.converterOption.apiOption {
+							var optionName string
+							if mediaTypeStr == "application/json" {
+								optionName = "api.body"
+							} else if mediaTypeStr == "application/x-www-form-urlencoded" || mediaTypeStr == "multipart/form-data" {
+								optionName = "api.form"
+							}
+							if optionName != "" {
+								newField.Options = append(newField.Options, &protobuf.Option{
+									Name:  optionName,
+									Value: fmt.Sprintf("%q", v.Name),
+								})
+								c.AddProtoImport(apiProtoFile)
+							}
+						}
+						if c.converterOption.openapiOption {
+							optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+							schemaOption := &protobuf.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							newField.Options = append(newField.Options, schemaOption)
+							c.AddProtoImport(openapiProtoFile)
+						}
+						message.Enums = append(message.Enums, v)
+						message.Fields = append(message.Fields, newField)
 					}
 				}
 			}
@@ -210,23 +389,98 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation) (
 	if len(operation.Parameters) > 0 {
 		for _, param := range operation.Parameters {
 			if param.Value.Schema != nil {
-				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(param.Value.Schema, param.Value.Name, message)
+				fieldOrMessage, err := c.ConvertSchemaToProtoType(param.Value.Schema, param.Value.Name, message)
 				if err != nil {
 					return "", err
 				}
 
 				switch v := fieldOrMessage.(type) {
 				case *protobuf.ProtoField:
+					if c.converterOption.apiOption {
+						v.Options = append(v.Options, &protobuf.Option{
+							Name:  "api." + param.Value.In,
+							Value: fmt.Sprintf("%q", param.Value.Name),
+						})
+						c.AddProtoImport(apiProtoFile)
+					}
+					if c.converterOption.openapiOption {
+						optionStr := utils.StructToProtobuf(param.Value.Schema.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						v.Options = append(v.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
+					}
 					addFieldIfNotExists(&message.Fields, v)
 				case *protobuf.ProtoMessage:
+					name := param.Value.Name
+					if c.converterOption.namingOption {
+						name = utils.ToPascaleCase(name)
+					} else {
+						name = utils.ToUpperFirstLetter(name)
+					}
+					newField := &protobuf.ProtoField{
+						Name: name,
+						Type: v.Name,
+					}
+					if c.converterOption.apiOption {
+						newField.Options = append(newField.Options, &protobuf.Option{
+							Name:  "api." + param.Value.In,
+							Value: fmt.Sprintf("%q", param.Value.Name),
+						})
+						c.AddProtoImport(apiProtoFile)
+					}
+					if c.converterOption.openapiOption {
+						optionStr := utils.StructToProtobuf(param.Value.Schema.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
+					}
 					addMessageIfNotExists(&message.Messages, v)
+					message.Fields = append(message.Fields, newField)
+				case *protobuf.ProtoEnum:
+					name := param.Value.Name
+					if c.converterOption.namingOption {
+						name = utils.ToPascaleCase(name)
+					} else {
+						name = utils.ToUpperFirstLetter(name)
+					}
+					newField := &protobuf.ProtoField{
+						Name: name,
+						Type: v.Name,
+					}
+					if c.converterOption.apiOption {
+						newField.Options = append(newField.Options, &protobuf.Option{
+							Name:  "api." + param.Value.In,
+							Value: fmt.Sprintf("%q", param.Value.Name),
+						})
+						c.AddProtoImport(apiProtoFile)
+					}
+					if c.converterOption.openapiOption {
+						optionStr := utils.StructToProtobuf(param.Value.Schema.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
+					}
+					message.Enums = append(message.Enums, v)
+					message.Fields = append(message.Fields, newField)
 				}
 			}
 		}
 	}
 
 	// if there are no fields or messages, return an empty message
-	if len(message.Fields) > 0 || len(message.Messages) > 0 {
+	if len(message.Fields) > 0 || len(message.Messages) > 0 || len(message.Enums) > 0 {
 		c.addMessageToProto(message)
 		return message.Name, nil
 	}
@@ -241,20 +495,31 @@ func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation) 
 	}
 
 	responses := operation.Responses.Map()
-	responseCount := len(responses)
+	responseCount := 0
+	for _, responseRef := range responses {
+		if responseRef.Ref == "" && (responseRef.Value == nil || (len(responseRef.Value.Content) == 0 && len(responseRef.Value.Headers) == 0)) {
+			continue
+		}
+		responseCount++
+	}
 
 	if responseCount == 1 {
 		for statusCode, responseRef := range responses {
-			if responseRef.Ref == "" && (responseRef.Value == nil || len(responseRef.Value.Content) == 0) {
+			if responseRef.Ref == "" && (responseRef.Value == nil || (len(responseRef.Value.Content) == 0 && len(responseRef.Value.Headers) == 0)) {
 				c.AddProtoImport(EmptyProtoFile)
-				return EmptyProtoFile, nil
+				return EmptyMessage, nil
 			}
 			return c.processSingleResponse(statusCode, responseRef, operation)
 		}
 	}
 
 	// create a wrapper message for multiple responses
-	wrapperMessageName := operation.OperationID
+	wrapperMessageName := operation.OperationID + "Response"
+	if c.converterOption.namingOption {
+		wrapperMessageName = utils.ToPascaleCase(wrapperMessageName)
+	} else {
+		wrapperMessageName = utils.ToUpperFirstLetter(wrapperMessageName)
+	}
 	wrapperMessage := &protobuf.ProtoMessage{Name: wrapperMessageName}
 
 	emptyFlag := true
@@ -269,8 +534,14 @@ func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation) 
 			return "", err
 		}
 
+		name := "Response_" + statusCode
+		if c.converterOption.namingOption {
+			name = utils.ToPascaleCase(name)
+		} else {
+			name = utils.ToUpperFirstLetter(name)
+		}
 		field := &protobuf.ProtoField{
-			Name: "response_" + statusCode,
+			Name: name,
 			Type: messageName,
 		}
 		wrapperMessage.Fields = append(wrapperMessage.Fields, field)
@@ -278,7 +549,7 @@ func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation) 
 
 	if emptyFlag {
 		c.AddProtoImport(EmptyProtoFile)
-		return EmptyProtoFile, nil
+		return EmptyMessage, nil
 	}
 
 	c.addMessageToProto(wrapperMessage)
@@ -293,23 +564,76 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 	}
 
 	response := responseRef.Value
-	messageName := operation.OperationID + "Response_" + statusCode
+	messageName := operation.OperationID + "Response" + utils.ToUpperFirstLetter(statusCode)
+	if c.converterOption.namingOption {
+		messageName = utils.ToPascaleCase(messageName)
+	} else {
+		messageName = utils.ToUpperFirstLetter(messageName)
+	}
 	newMessage := &protobuf.ProtoMessage{Name: messageName}
 
 	if len(response.Headers) > 0 {
 		for headerName, headerRef := range response.Headers {
 			if headerRef != nil {
 
-				fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(headerRef.Value.Schema, headerName, newMessage)
+				fieldOrMessage, err := c.ConvertSchemaToProtoType(headerRef.Value.Schema, headerName, newMessage)
 				if err != nil {
 					return "", err
 				}
 
 				switch v := fieldOrMessage.(type) {
 				case *protobuf.ProtoField:
+					if c.converterOption.apiOption {
+						option := &protobuf.Option{
+							Name:  "api.header",
+							Value: fmt.Sprintf("%q", headerName),
+						}
+						v.Options = append(v.Options, option)
+						c.AddProtoImport(apiProtoFile)
+					}
 					addFieldIfNotExists(&newMessage.Fields, v)
 				case *protobuf.ProtoMessage:
+					name := headerName
+					if c.converterOption.namingOption {
+						name = utils.ToSnakeCase(name)
+					} else {
+						name = utils.ToUpperFirstLetter(name)
+					}
+					newField := &protobuf.ProtoField{
+						Name: name,
+						Type: v.Name,
+					}
+					if c.converterOption.apiOption {
+						option := &protobuf.Option{
+							Name:  "api.header",
+							Value: fmt.Sprintf("%q", headerName),
+						}
+						newField.Options = append(newField.Options, option)
+						c.AddProtoImport(apiProtoFile)
+					}
 					addMessageIfNotExists(&newMessage.Messages, v)
+					newMessage.Fields = append(newMessage.Fields, newField)
+				case *protobuf.ProtoEnum:
+					name := headerName
+					if c.converterOption.namingOption {
+						name = utils.ToSnakeCase(name)
+					} else {
+						name = utils.ToUpperFirstLetter(name)
+					}
+					newField := &protobuf.ProtoField{
+						Name: name,
+						Type: v.Name,
+					}
+					if c.converterOption.apiOption {
+						option := &protobuf.Option{
+							Name:  "api.header",
+							Value: fmt.Sprintf("%q", headerName),
+						}
+						newField.Options = append(newField.Options, option)
+						c.AddProtoImport(apiProtoFile)
+					}
+					newMessage.Enums = append(newMessage.Enums, v)
+					newMessage.Fields = append(newMessage.Fields, newField)
 				}
 			}
 		}
@@ -319,133 +643,303 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 		schema := mediaType.Schema
 		if schema != nil {
 
-			fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema, mediaTypeStr, newMessage)
+			fieldOrMessage, err := c.ConvertSchemaToProtoType(schema, utils.FormatNaming(mediaTypeStr), newMessage)
 			if err != nil {
 				return "", err
 			}
 
 			switch v := fieldOrMessage.(type) {
 			case *protobuf.ProtoField:
+				if c.converterOption.apiOption && mediaTypeStr == "application/json" {
+					option := &protobuf.Option{
+						Name:  "api.body",
+						Value: fmt.Sprintf("%q", v.Name),
+					}
+					v.Options = append(v.Options, option)
+					c.AddProtoImport(apiProtoFile)
+				}
+				if c.converterOption.openapiOption {
+					optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+					schemaOption := &protobuf.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					v.Options = append(v.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
+				}
 				addFieldIfNotExists(&newMessage.Fields, v)
 			case *protobuf.ProtoMessage:
 				addMessageIfNotExists(&newMessage.Messages, v)
+				name := mediaTypeStr
+				if c.converterOption.namingOption {
+					name = utils.ToSnakeCase(mediaTypeStr)
+				} else {
+					name = utils.ToUpperFirstLetter(name)
+				}
+				newField := &protobuf.ProtoField{
+					Name: name,
+					Type: v.Name,
+				}
+				if c.converterOption.apiOption && mediaTypeStr == "application/json" {
+					option := &protobuf.Option{
+						Name:  "api.body",
+						Value: fmt.Sprintf("%q", v.Name),
+					}
+					newField.Options = append(newField.Options, option)
+					c.AddProtoImport(apiProtoFile)
+				}
+				if c.converterOption.openapiOption {
+					optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+					schemaOption := &protobuf.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
+				}
+				newMessage.Fields = append(newMessage.Fields, newField)
+			case *protobuf.ProtoEnum:
+				name := mediaTypeStr
+				if c.converterOption.namingOption {
+					name = utils.ToSnakeCase(mediaTypeStr)
+				} else {
+					name = utils.ToUpperFirstLetter(name)
+				}
+				newField := &protobuf.ProtoField{
+					Name: name,
+					Type: v.Name,
+				}
+				if c.converterOption.apiOption && mediaTypeStr == "application/json" {
+					option := &protobuf.Option{
+						Name:  "api.body",
+						Value: fmt.Sprintf("%q", v.Name),
+					}
+					newField.Options = append(newField.Options, option)
+					c.AddProtoImport(apiProtoFile)
+				}
+				if c.converterOption.openapiOption {
+					optionStr := utils.StructToProtobuf(schema.Value, "     ")
+
+					schemaOption := &protobuf.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
+				}
+				newMessage.Enums = append(newMessage.Enums, v)
+				newMessage.Fields = append(newMessage.Fields, newField)
 			}
 		}
 	}
 
-	if len(newMessage.Fields) > 0 || len(newMessage.Messages) > 0 {
+	if len(newMessage.Fields) > 0 || len(newMessage.Messages) > 0 || len(newMessage.Enums) > 0 {
 		c.addMessageToProto(newMessage)
 		return newMessage.Name, nil
 	}
 	return "", nil
 }
 
-// ConvertSchemaToProtoFieldOrMessage converts an OpenAPI schema to a Proto field or message
-func (c *ProtoConverter) ConvertSchemaToProtoFieldOrMessage(schemaRef *openapi3.SchemaRef, protoName string, parentMessage *protobuf.ProtoMessage) (interface{}, error) {
+// ConvertSchemaToProtoType converts an OpenAPI schema to a Proto field or message
+func (c *ProtoConverter) ConvertSchemaToProtoType(
+	schemaRef *openapi3.SchemaRef,
+	protoName string,
+	parentMessage *protobuf.ProtoMessage) (interface{}, error) {
+
+	var protoType string
+	var result interface{}
+
+	// Handle referenced schema
 	if schemaRef.Ref != "" {
-		return &protobuf.ProtoField{Name: utils.ExtractMessageNameFromRef(schemaRef.Ref), Type: utils.ExtractMessageNameFromRef(schemaRef.Ref)}, nil
+		name := c.applyNamingOption(utils.ExtractMessageNameFromRef(schemaRef.Ref))
+		return &protobuf.ProtoField{
+			Name: name,
+			Type: utils.ExtractMessageNameFromRef(schemaRef.Ref),
+		}, nil
 	}
 
-	if schemaRef.Value != nil {
-		schema := schemaRef.Value
-		if schema.Type == nil {
-			return nil, errors.New("schema type is required")
+	// Ensure schema value is valid
+	if schemaRef.Value == nil || schemaRef.Value.Type == nil {
+		return nil, errors.New("schema type is required")
+	}
+
+	schema := schemaRef.Value
+
+	// Process schema type
+	switch {
+	case schema.Type.Includes("string"):
+		if schema.Format == "date" || schema.Format == "date-time" {
+			protoType = "google.protobuf.Timestamp"
+			c.AddProtoImport("google/protobuf/timestamp.proto")
+		} else if len(schema.Enum) != 0 {
+			var name string
+			if parentMessage == nil {
+				name = protoName
+			} else {
+				name = c.applyNamingOption(parentMessage.Name + utils.ToUpperFirstLetter(protoName))
+			}
+			protoEnum := &protobuf.ProtoEnum{
+				Name: name,
+			}
+			for i, enumValue := range schema.Enum {
+				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
+					Index: i,
+					Value: enumValue,
+				})
+			}
+			result = protoEnum
+		} else {
+			protoType = "string"
 		}
-		if schema.Type != nil {
-			var protoType string
-			if schema.Type.Includes("string") {
-				if schema.Format == "date" || schema.Format == "date-time" {
-					protoType = "google.protobuf.Timestamp"
-					c.AddProtoImport("google/protobuf/timestamp.proto")
-				} else {
-					protoType = "string"
-				}
-			} else if schema.Type.Includes("integer") {
-				if schema.Format == "int32" {
-					protoType = "int32"
-				} else {
-					protoType = "int64"
-				}
-			} else if schema.Type.Includes("number") {
-				if schema.Format == "float" {
-					protoType = "float"
-				} else {
-					protoType = "double"
-				}
-			} else if schema.Type.Includes("boolean") {
-				protoType = "bool"
-			} else if schema.Type.Includes("array") {
-				if schema.Items != nil {
-					itemSchema := schema.Items
-					// recursive call to handle array items
-					fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(itemSchema, protoName+"Item", parentMessage)
-					if err != nil {
-						return nil, err
-					}
 
-					if field, ok := fieldOrMessage.(*protobuf.ProtoField); ok {
-						return &protobuf.ProtoField{
-							Name:     protoName,
-							Type:     field.Type, // 这里直接生成 repeated 类型
-							Repeated: true,
-						}, nil
-					} else if nestedMessage, ok := fieldOrMessage.(*protobuf.ProtoMessage); ok {
-						repeatedField := &protobuf.ProtoField{
-							Name:     protoName,
-							Type:     nestedMessage.Name,
-							Repeated: true,
-						}
+	case schema.Type.Includes("integer"):
+		if len(schema.Enum) != 0 {
+			var name string
+			if parentMessage == nil {
+				name = protoName
+			} else {
+				name = c.applyNamingOption(parentMessage.Name + utils.ToUpperFirstLetter(protoName))
+			}
+			protoEnum := &protobuf.ProtoEnum{
+				Name: name,
+			}
+			for i, enumValue := range schema.Enum {
+				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
+					Index: i,
+					Value: enumValue,
+				})
+			}
+			result = protoEnum
+		} else if schema.Format == "int32" {
+			protoType = "int32"
+		} else {
+			protoType = "int64"
+		}
 
-						c.addNestedMessageToParent(parentMessage, nestedMessage)
+	case schema.Type.Includes("number"):
+		if len(schema.Enum) != 0 {
+			var name string
+			if parentMessage == nil {
+				name = protoName
+			} else {
+				name = c.applyNamingOption(parentMessage.Name + utils.ToUpperFirstLetter(protoName))
+			}
+			protoEnum := &protobuf.ProtoEnum{
+				Name: name,
+			}
+			for i, enumValue := range schema.Enum {
+				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
+					Index: i,
+					Value: enumValue,
+				})
+			}
+			result = protoEnum
+		} else if schema.Format == "float" {
+			protoType = "float"
+		} else {
+			protoType = "double"
+		}
 
-						return repeatedField, nil
-					}
-				}
-			} else if schema.Type.Includes("object") {
-				message := &protobuf.ProtoMessage{Name: protoName}
-				for propName, propSchema := range schema.Properties {
-					// recursive call to handle object properties
-					fieldOrMessage, err := c.ConvertSchemaToProtoFieldOrMessage(propSchema, propName, message)
-					if err != nil {
-						return nil, err
-					}
+	case schema.Type.Includes("boolean"):
+		protoType = "bool"
 
-					if field, ok := fieldOrMessage.(*protobuf.ProtoField); ok {
-						message.Fields = append(message.Fields, field)
-					} else if nestedMessage, ok := fieldOrMessage.(*protobuf.ProtoMessage); ok {
-						c.addNestedMessageToParent(message, nestedMessage)
-						message.Fields = append(message.Fields, &protobuf.ProtoField{
-							Name: propName + "Field",
-							Type: nestedMessage.Name,
-						})
-					}
-				}
-
-				if schema.AdditionalProperties.Schema != nil {
-					mapValueType := "string"
-					additionalPropMessage, err := c.ConvertSchemaToProtoFieldOrMessage(schema.AdditionalProperties.Schema, protoName+"AdditionalProperties", parentMessage)
-					if err != nil {
-						return nil, err
-					}
-					if message, ok := additionalPropMessage.(*protobuf.ProtoMessage); ok {
-						mapValueType = message.Name
-					}
-					message.Fields = append(message.Fields, &protobuf.ProtoField{
-						Name: "additionalProperties",
-						Type: "map<string, " + mapValueType + ">",
-					})
-				}
-
-				return message, nil
+	case schema.Type.Includes("array"):
+		if schema.Items != nil {
+			fieldOrMessage, err := c.ConvertSchemaToProtoType(schema.Items, protoName+"Item", parentMessage)
+			if err != nil {
+				return nil, err
 			}
 
-			return &protobuf.ProtoField{
-				Name: protoName,
-				Type: protoType,
-			}, nil
+			fieldType := ""
+			if field, ok := fieldOrMessage.(*protobuf.ProtoField); ok {
+				fieldType = field.Type
+			} else if nestedMessage, ok := fieldOrMessage.(*protobuf.ProtoMessage); ok {
+				fieldType = nestedMessage.Name
+				c.addNestedMessageToParent(parentMessage, nestedMessage)
+			} else if enum, ok := fieldOrMessage.(*protobuf.ProtoEnum); ok {
+				fieldType = enum.Name
+				c.addNestedEnumToParent(parentMessage, enum)
+			}
+
+			result = &protobuf.ProtoField{
+				Name:     c.applyNamingOption(protoName),
+				Type:     fieldType,
+				Repeated: true,
+			}
+		}
+
+	case schema.Type.Includes("object"):
+		var message *protobuf.ProtoMessage
+		if parentMessage == nil {
+			message = &protobuf.ProtoMessage{Name: protoName}
+		} else {
+			message = &protobuf.ProtoMessage{Name: c.applyNamingOption(parentMessage.Name + utils.ToUpperFirstLetter(protoName))}
+		}
+		for propName, propSchema := range schema.Properties {
+			protoType, err := c.ConvertSchemaToProtoType(propSchema, propName, message)
+			if err != nil {
+				return nil, err
+			}
+
+			if field, ok := protoType.(*protobuf.ProtoField); ok {
+				message.Fields = append(message.Fields, field)
+			} else if nestedMessage, ok := protoType.(*protobuf.ProtoMessage); ok {
+				//nestedMessage.Name = message.Name + nestedMessage.Name
+				c.addNestedMessageToParent(message, nestedMessage)
+				message.Fields = append(message.Fields, &protobuf.ProtoField{
+					Name: c.applyNamingOption(propName),
+					Type: nestedMessage.Name,
+				})
+			} else if enum, ok := protoType.(*protobuf.ProtoEnum); ok {
+				//enum.Name = message.Name + enum.Name
+				c.addNestedEnumToParent(message, enum)
+				message.Fields = append(message.Fields, &protobuf.ProtoField{
+					Name: c.applyNamingOption(propName),
+					Type: enum.Name,
+				})
+			}
+		}
+
+		if schema.AdditionalProperties.Schema != nil {
+			mapValueType := "string"
+			additionalPropMessage, err := c.ConvertSchemaToProtoType(schema.AdditionalProperties.Schema, protoName+"AdditionalProperties", parentMessage)
+			if err != nil {
+				return nil, err
+			}
+			if msg, ok := additionalPropMessage.(*protobuf.ProtoMessage); ok {
+				mapValueType = msg.Name
+			} else if enum, ok := additionalPropMessage.(*protobuf.ProtoEnum); ok {
+				mapValueType = enum.Name
+			}
+
+			message.Fields = append(message.Fields, &protobuf.ProtoField{
+				Name: "additionalProperties",
+				Type: "map<string, " + mapValueType + ">",
+			})
+		}
+
+		result = message
+	}
+
+	// If result is still nil, construct a default ProtoField
+	if result == nil {
+		result = &protobuf.ProtoField{
+			Name: c.applyNamingOption(protoName),
+			Type: protoType,
 		}
 	}
-	return nil, nil
+
+	return result, nil
+}
+
+// applyNamingOption applies naming convention based on the converter's naming option
+func (c *ProtoConverter) applyNamingOption(name string) string {
+	if c.converterOption.namingOption {
+		return utils.ToPascaleCase(name)
+	}
+	return utils.ToUpperFirstLetter(name)
 }
 
 // addNestedMessageToParent adds a nested message to a parent message
@@ -455,9 +949,15 @@ func (c *ProtoConverter) addNestedMessageToParent(parentMessage, nestedMessage *
 	}
 }
 
+// addNestedEnum adds a nested Enum to a parent message
+func (c *ProtoConverter) addNestedEnumToParent(parentMessage *protobuf.ProtoMessage, nestedEnum *protobuf.ProtoEnum) {
+	if parentMessage != nil && nestedEnum != nil {
+		parentMessage.Enums = append(parentMessage.Enums, nestedEnum)
+	}
+}
+
 // mergeProtoMessage merges a ProtoMessage into the ProtoFile
 func (c *ProtoConverter) addMessageToProto(message *protobuf.ProtoMessage) error {
-
 	var existingMessage *protobuf.ProtoMessage
 	for _, msg := range c.ProtoFile.Messages {
 		if msg.Name == message.Name {
@@ -516,6 +1016,11 @@ func (c *ProtoConverter) addMessageToProto(message *protobuf.ProtoMessage) error
 	}
 
 	return nil
+}
+
+// addEnumToProto adds an enum to the ProtoFile
+func (c *ProtoConverter) addEnumToProto(enum *protobuf.ProtoEnum) {
+	c.ProtoFile.Enums = append(c.ProtoFile.Enums, enum)
 }
 
 // AddProtoImport adds an import to the ProtoFile

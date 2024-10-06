@@ -1,12 +1,30 @@
+/*
+ * Copyright 2024 CloudWeGo Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package utils
 
 import (
 	"fmt"
+	"github.com/iancoleman/strcase"
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode"
 
-	"github.com/iancoleman/strcase"
+	"github.com/getkin/kin-openapi/openapi3"
 )
 
 func Stringify(value interface{}) string {
@@ -30,6 +48,7 @@ func Stringify(value interface{}) string {
 		return fmt.Sprintf("%v", v) // Convert other types directly to string
 	}
 }
+
 func StructToProtobuf(value interface{}, indent string) string {
 	var sb strings.Builder
 	v := reflect.ValueOf(value)
@@ -99,6 +118,13 @@ func StructToProtobuf(value interface{}, indent string) string {
 			}
 			fieldName = strings.Split(fieldName, ",")[0] // Remove options from json tag, e.g., "omitempty"
 
+			// Skip specific fields (Parameters, RequestBody, Responses)
+			if fieldName == "parameters" || fieldName == "requestBody" || fieldName == "responses" ||
+				fieldName == "schemas" || fieldName == "requestBodies" || fieldName == "items" ||
+				fieldName == "paths" || fieldName == "properties" {
+				continue
+			}
+
 			// Use the field name as the Protobuf key
 			sb.WriteString(fmt.Sprintf("%s  %s: ", indent, fieldName))
 
@@ -116,7 +142,10 @@ func StructToProtobuf(value interface{}, indent string) string {
 		if v.String() == "" {
 			return "" // Skip empty strings
 		}
-		return fmt.Sprintf("\"%s\"", v.String())
+
+		// Process multi-line strings by replacing actual newlines with "\n"
+		multiLineStr := strings.ReplaceAll(v.String(), "\n", "\\n")
+		return fmt.Sprintf("\"%s\"", multiLineStr)
 	case reflect.Int, reflect.Int64, reflect.Int32:
 		if v.Int() == 0 {
 			return "" // Skip 0 values
@@ -173,9 +202,18 @@ func isZeroValue(v reflect.Value) bool {
 	}
 }
 
-func GenerateMethodName(operationID, method string) string {
-	if operationID != "" {
-		return operationID
+func GenerateMethodName(operation *openapi3.Operation, method string) string {
+	if operation.OperationID != "" {
+		return operation.OperationID
+	}
+	if operation.Tags != nil {
+		return operation.Tags[0]
+	}
+	if operation.Summary != "" {
+		return operation.Summary
+	}
+	if operation.Description != "" {
+		return operation.Description
 	}
 	// If no OperationID, generate using HTTP method
 	return strings.Title(strings.ToLower(method)) + "Method"
@@ -193,6 +231,16 @@ func GetServiceName(tags []string) string {
 	return "DefaultService"
 }
 
+func GetPackageName(spec *openapi3.T) string {
+	if spec.Info.Title != "" {
+		return ToSnakeCase(spec.Info.Title)
+	}
+	if spec.Info.Description != "" {
+		return ToSnakeCase(spec.Info.Description)
+	}
+	return "default_package"
+}
+
 func ConvertPath(path string) string {
 	// Regular expression to match content inside {}
 	re := regexp.MustCompile(`\{(\w+)\}`)
@@ -201,9 +249,107 @@ func ConvertPath(path string) string {
 	return result
 }
 
-func SanitizeName(name string) string {
-	// formatName := strcase.ToSnake(name)
-	formatName := strcase.ToCamel(name)
-	// formatName := strcase.ToLowerCamel(name)
-	return formatName
+// ToUpperFirstLetter converts the first letter of a string to uppercase
+func ToUpperFirstLetter(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+
+	firstChar := unicode.ToUpper(rune(s[0]))
+
+	if len(s) == 1 {
+		return string(firstChar)
+	}
+
+	return string(firstChar) + s[1:]
+}
+
+func FormatNaming(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "-", "_")
+	return name
+}
+
+func ToPascaleCase(name string) string {
+	name = strcase.ToCamel(name)
+	name = ToUpperFirstLetter(name)
+	return name
+}
+
+func ToSnakeCase(name string) string {
+	name = FormatNaming(name)
+	name = ToSnake(name)
+	return name
+}
+
+// ToSnake converts a string to snake_case
+func ToSnake(s string) string {
+	return ToDelimited(s, '_')
+}
+
+// ToDelimited converts a string to delimited.snake.case
+// (in this case `delimiter = '.'`)
+func ToDelimited(s string, delimiter uint8) string {
+	return ToScreamingDelimited(s, delimiter, "", false)
+}
+
+// ToScreamingDelimited converts a string to SCREAMING.DELIMITED.SNAKE.CASE
+// (in this case `delimiter = '.'; screaming = true`)
+// or delimited.snake.case
+// (in this case `delimiter = '.'; screaming = false`)
+func ToScreamingDelimited(s string, delimiter uint8, ignore string, screaming bool) string {
+	s = strings.TrimSpace(s)
+	n := strings.Builder{}
+	n.Grow(len(s) + 2) // nominal 2 bytes of extra space for inserted delimiters
+	for i, v := range []byte(s) {
+		vIsCap := v >= 'A' && v <= 'Z'
+		vIsLow := v >= 'a' && v <= 'z'
+		if vIsLow && screaming {
+			v += 'A'
+			v -= 'a'
+		} else if vIsCap && !screaming {
+			v += 'a'
+			v -= 'A'
+		}
+
+		// treat acronyms as words, eg for JSONData -> JSON is a whole word
+		if i+1 < len(s) {
+			next := s[i+1]
+			vIsNum := v >= '0' && v <= '9'
+			nextIsCap := next >= 'A' && next <= 'Z'
+			nextIsLow := next >= 'a' && next <= 'z'
+			nextIsNum := next >= '0' && next <= '9'
+
+			// add delimiter if the next character is of a different type
+			// but do not insert delimiter between a letter and a number
+			if (vIsCap && (nextIsLow || nextIsNum)) || (vIsLow && (nextIsCap || nextIsNum)) || (vIsNum && (nextIsCap || nextIsLow)) {
+				prevIgnore := ignore != "" && i > 0 && strings.ContainsAny(string(s[i-1]), ignore)
+				if !prevIgnore {
+					if vIsCap && nextIsLow {
+						if prevIsCap := i > 0 && s[i-1] >= 'A' && s[i-1] <= 'Z'; prevIsCap {
+							n.WriteByte(delimiter)
+						}
+					}
+
+					// Skip adding delimiter if current character is a letter followed by a number
+					if !(vIsLow && nextIsNum) && !(vIsCap && nextIsNum) {
+						n.WriteByte(v)
+						if vIsLow || vIsNum || nextIsNum {
+							n.WriteByte(delimiter)
+						}
+						continue
+					}
+				}
+			}
+		}
+
+		if (v == ' ' || v == '_' || v == '-' || v == '.') && !strings.ContainsAny(string(v), ignore) {
+			// replace space/underscore/hyphen/dot with delimiter
+			n.WriteByte(delimiter)
+		} else {
+			n.WriteByte(v)
+		}
+	}
+
+	return n.String()
 }
