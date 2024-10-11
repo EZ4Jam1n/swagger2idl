@@ -32,6 +32,7 @@ type ProtoMessage struct {
 	Fields   []*ProtoField   // List of fields in the Proto message
 	Messages []*ProtoMessage // Nested Proto messages
 	Enums    []*ProtoEnum    // Enums within the Proto message
+	OneOfs   []*ProtoOneOf   // OneOfs within the Proto message
 	Options  []*Option       // Options specific to this Proto message
 }
 
@@ -39,12 +40,8 @@ type ProtoMessage struct {
 type ProtoField struct {
 	Name     string
 	Type     string
-	Repeated bool            // Indicates if the field is repeated (array)
-	OneOf    []*ProtoField   // Collection of oneof fields (for representing oneOf types)
-	Fields   []*ProtoField   // Nested fields (for object types)
-	Messages []*ProtoMessage // Nested Proto messages within the field
-	Enums    []*ProtoEnum    // Nested enums within the field
-	Options  []*Option       // Additional options for this field
+	Repeated bool      // Indicates if the field is repeated (array)
+	Options  []*Option // Additional options for this field
 }
 
 // Option represents an option in a Proto field or message
@@ -79,4 +76,11 @@ type ProtoEnum struct {
 type ProtoEnumValue struct {
 	Index int // index of the enum value
 	Value any // Corresponding integer value for the enum
+}
+
+// ProtoOneOf represents a oneof in a Proto message
+type ProtoOneOf struct {
+	Name    string        // Name of the oneof
+	Fields  []*ProtoField // List of fields in the oneof
+	Options []*Option     // Options specific to this oneof
 }

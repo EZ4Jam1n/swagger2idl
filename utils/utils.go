@@ -121,7 +121,9 @@ func StructToProtobuf(value interface{}, indent string) string {
 			// Skip specific fields (Parameters, RequestBody, Responses)
 			if fieldName == "parameters" || fieldName == "requestBody" || fieldName == "responses" ||
 				fieldName == "schemas" || fieldName == "requestBodies" || fieldName == "items" ||
-				fieldName == "paths" || fieldName == "properties" {
+				fieldName == "paths" || fieldName == "properties" || fieldName == "content" ||
+				fieldName == "schema" || fieldName == "oneOf" || fieldName == "allOf" || fieldName == "anyOf" ||
+				fieldName == "additionalProperties" {
 				continue
 			}
 
@@ -202,33 +204,34 @@ func isZeroValue(v reflect.Value) bool {
 	}
 }
 
-func GenerateMethodName(operation *openapi3.Operation, method string) string {
+func GetMethodName(operation *openapi3.Operation, path, method string) string {
 	if operation.OperationID != "" {
 		return operation.OperationID
 	}
 	if operation.Tags != nil {
 		return operation.Tags[0]
 	}
-	if operation.Summary != "" {
-		return operation.Summary
-	}
-	if operation.Description != "" {
-		return operation.Description
+	if path != "" {
+		// Convert path to PascalCase, replacing placeholders with a suitable format
+		convertedPath := ConvertPathToPascalCase(path)
+		return convertedPath + strings.Title(strings.ToLower(method))
 	}
 	// If no OperationID, generate using HTTP method
 	return strings.Title(strings.ToLower(method)) + "Method"
 }
 
-func ExtractMessageNameFromRef(ref string) string {
-	parts := strings.Split(ref, "/")
-	return parts[len(parts)-1] // Return the last part, usually the name of the reference
-}
-
-func GetServiceName(tags []string) string {
-	if len(tags) > 0 {
-		return tags[0]
+func GetServiceName(operation *openapi3.Operation) string {
+	if len(operation.Tags) > 0 {
+		return operation.Tags[0]
 	}
 	return "DefaultService"
+}
+
+func GetMessageName(operation *openapi3.Operation, methodName, suffix string) string {
+	if operation.OperationID != "" {
+		return operation.OperationID + suffix
+	}
+	return methodName + suffix
 }
 
 func GetPackageName(spec *openapi3.T) string {
@@ -239,6 +242,29 @@ func GetPackageName(spec *openapi3.T) string {
 		return ToSnakeCase(spec.Info.Description)
 	}
 	return "default_package"
+}
+
+// ConvertPathToPascalCase converts a path with placeholders to PascalCase
+func ConvertPathToPascalCase(path string) string {
+	// Replace placeholders like {orderId} with OrderId
+	re := regexp.MustCompile(`\{(\w+)\}`)
+	path = re.ReplaceAllStringFunc(path, func(s string) string {
+		return ToPascaleCase(strings.Trim(s, "{}"))
+	})
+
+	// Split the path by '/' and convert each segment to PascalCase
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = ToPascaleCase(segment)
+	}
+
+	// Join the segments back together
+	return strings.Join(segments, "")
+}
+
+func ExtractMessageNameFromRef(ref string) string {
+	parts := strings.Split(ref, "/")
+	return parts[len(parts)-1] // Return the last part, usually the name of the reference
 }
 
 func ConvertPath(path string) string {

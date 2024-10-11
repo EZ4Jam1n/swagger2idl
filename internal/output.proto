@@ -4,23 +4,33 @@ package example_swagger_doc;
 
 import "api.proto";
 
+option go_package = "github.com/hertz-contrib/swagger-generate/example";
+
+message BodyReqBody {
+  string Body = 1;
+  string Body1 = 2;
+}
+
+message FormReqForm {
+  string Form1 = 1;
+  FormReq_InnerForm FormReqInnerForm = 2;
+}
+
+message FormReq_InnerForm {
+  string Form3 = 1;
+}
+
 message HelloRespBody {
   string Body = 1;
 }
 
 message HelloService1BodyMethodRequest {
-  HelloService1BodyMethodRequestApplicationJson Applicationjson = 1 [
-    (api.body) = "HelloService1BodyMethodRequestApplicationJson"
+  BodyReqBody BodyReqBody = 1 [
+    (api.body) = "BodyReqBody"
   ];
   string Query2 = 2 [
     (api.query) = "query2"
   ];
-
-  message HelloService1BodyMethodRequestApplicationJson {
-    string Body = 1;
-    string Body1 = 2;
-  }
-
 }
 
 message HelloService1BodyMethodResponse200 {
@@ -33,22 +43,9 @@ message HelloService1BodyMethodResponse200 {
 }
 
 message HelloService1FormMethodRequest {
-  HelloService1FormMethodRequestApplicationXWwwFormUrlencoded ApplicationxWwwFormUrlencoded = 1 [
-    (api.form) = "HelloService1FormMethodRequestApplicationXWwwFormUrlencoded"
+  FormReqForm FormReqForm = 1 [
+    (api.form) = "FormReqForm"
   ];
-  HelloService1FormMethodRequestMultipartFormData MultipartformData = 2 [
-    (api.form) = "HelloService1FormMethodRequestMultipartFormData"
-  ];
-
-  message HelloService1FormMethodRequestMultipartFormData {
-    string Form1 = 1;
-  }
-
-
-  message HelloService1FormMethodRequestApplicationXWwwFormUrlencoded {
-    string Form1 = 1;
-  }
-
 }
 
 message HelloService1FormMethodResponse200 {
@@ -82,9 +79,45 @@ message HelloService1QueryMethod1Request {
   string Query2 = 2 [
     (api.query) = "query2"
   ];
+  map<string, string> additionalProperties = 3 [
+    (api.query) = "query1"
+  ];
 }
 
 message HelloService1QueryMethod1Response200 {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody"
+  ];
+  string Token = 2 [
+    (api.header) = "token"
+  ];
+}
+
+message HelloService2QueryMethod2Request {
+  repeated Items1Item Items1 = 1 [
+    (api.query) = "items1"
+  ];
+  string Query2 = 2 [
+    (api.query) = "query2"
+  ];
+  map<string, string> additionalProperties = 3 [
+    (api.query) = "query1"
+  ];
+
+  message Items1Item {
+    AgeEnum Age = 1;
+    string Name = 2;
+
+    enum AgeEnum {
+      AgeEnum1 = 0;
+      b = 1;
+    }
+
+  }
+
+}
+
+message HelloService2QueryMethod2Response200 {
   HelloRespBody HelloRespBody = 1 [
     (api.body) = "HelloRespBody"
   ];
@@ -104,7 +137,13 @@ service HelloService1 {
      option (api.get) = "/path:path1";
   }
   rpc HelloService1QueryMethod1(HelloService1QueryMethod1Request) returns (HelloService1QueryMethod1Response200) {
-     option (api.get) = "/hello";
+     option (api.get) = "/hello1";
+  }
+}
+
+service HelloService2 {
+  rpc HelloService2QueryMethod2(HelloService2QueryMethod2Request) returns (HelloService2QueryMethod2Response200) {
+     option (api.get) = "/hello2";
   }
 }
 

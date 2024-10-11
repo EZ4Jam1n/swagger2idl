@@ -1,71 +1,162 @@
-/*
- * Copyright 2024 CloudWeGo Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package main
 
 import (
+	"log"
+	"os"
+	"path/filepath"
+
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/converter"
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/generate"
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/parser"
-	"log"
-	"os"
+	"github.com/urfave/cli/v2"
 )
 
 const defaultProtoFilename = "output.proto"
+const defaultThriftFilename = "output.thrift"
+
+var (
+	outputType    string
+	outputFile    string
+	openapiOption bool
+	apiOption     bool
+	namingOption  bool
+)
 
 func main() {
-	// Ensure the OpenAPI file path is provided as a command-line argument
-	if len(os.Args) < 2 {
-		log.Fatal("Please provide the path to the OpenAPI file.")
+	// Create a new CLI app
+	app := &cli.App{
+		Name:  "swagger2idl",
+		Usage: "Convert OpenAPI specs to Protobuf or Thrift IDL",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "type",
+				Aliases:     []string{"t"},
+				Usage:       "Specify output type: 'proto' or 'thrift'. If not provided, inferred from output file extension.",
+				Destination: &outputType,
+			},
+			&cli.StringFlag{
+				Name:        "output",
+				Aliases:     []string{"o"},
+				Usage:       "Specify output file path. If not provided, defaults to output.proto or output.thrift based on the output type.",
+				Destination: &outputFile,
+			},
+			&cli.BoolFlag{
+				Name:        "openapi",
+				Usage:       "Include OpenAPI specific options in the output",
+				Destination: &openapiOption,
+			},
+			&cli.BoolFlag{
+				Name:        "api",
+				Usage:       "Include API specific options in the output",
+				Value:       true,
+				Destination: &apiOption,
+			},
+			&cli.BoolFlag{
+				Name:        "naming",
+				Usage:       "Use PascalCase naming convention",
+				Value:       true,
+				Destination: &namingOption,
+			},
+		},
+		Action: func(c *cli.Context) error {
+			// Get remaining non-flag arguments (e.g., file paths)
+			args := c.Args().Slice()
+
+			// Ensure the OpenAPI file path is provided
+			if len(args) < 1 {
+				log.Fatal("Please provide the path to the OpenAPI file.")
+			}
+
+			openapiFile := args[0]
+
+			// Automatically determine output type based on file extension if not provided
+			if outputType == "" && outputFile != "" {
+				ext := filepath.Ext(outputFile)
+				switch ext {
+				case ".proto":
+					outputType = "proto"
+				case ".thrift":
+					outputType = "thrift"
+				default:
+					log.Fatalf("Cannot determine output type from file extension: %s. Use --type to specify explicitly.", ext)
+				}
+			}
+
+			// If output file is not specified, use a default file based on outputType
+			if outputFile == "" {
+				if outputType == "proto" {
+					outputFile = defaultProtoFilename
+				} else if outputType == "thrift" {
+					outputFile = defaultThriftFilename
+				} else {
+					log.Fatal("Output file must be specified if output type is not provided.")
+				}
+			}
+
+			// Load the OpenAPI specification
+			spec, err := parser.LoadOpenAPISpec(openapiFile)
+			if err != nil {
+				log.Fatalf("Failed to load OpenAPI file: %v", err)
+			}
+
+			// Initialize ConvertOption with command-line flag values
+			converterOption := &converter.ConvertOption{
+				OpenapiOption: openapiOption,
+				ApiOption:     apiOption,
+				NamingOption:  namingOption,
+			}
+
+			var idlContent string
+			var file *os.File
+			var errFile error
+
+			switch outputType {
+			case "proto":
+				protoConv := converter.NewProtoConverter(spec, converterOption)
+
+				if err = protoConv.Convert(); err != nil {
+					log.Fatalf("Error during conversion: %v", err)
+				}
+				protoEngine := generate.NewProtoGenerate()
+
+				idlContent, err = protoEngine.Generate(protoConv.GetIdl())
+
+				file, errFile = os.Create(outputFile)
+			case "thrift":
+				thriftConv := converter.NewThriftConverter(spec, converterOption)
+
+				if err = thriftConv.Convert(); err != nil {
+					log.Fatalf("Error during conversion: %v", err)
+				}
+				thriftEngine := generate.NewThriftGenerate()
+
+				idlContent, err = thriftEngine.Generate(thriftConv.GetIdl())
+
+				file, errFile = os.Create(outputFile)
+			default:
+				log.Fatalf("Invalid output type: %s", outputType)
+			}
+
+			if errFile != nil {
+				log.Fatalf("Failed to create file: %v", errFile)
+			}
+			defer func() {
+				if err := file.Close(); err != nil {
+					log.Printf("Error closing file: %v", err)
+				}
+			}()
+
+			if _, err = file.WriteString(idlContent); err != nil {
+				log.Fatalf("Error writing to file: %v", err)
+			}
+
+			return nil
+		},
 	}
 
-	openapiFile := os.Args[1]
-
-	// Load the OpenAPI specification
-	spec, err := parser.LoadOpenAPISpec(openapiFile)
+	// Run the app
+	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatalf("Failed to load OpenAPI file: %v", err)
-	}
-
-	converter := converter.NewProtoConverter(spec)
-
-	if err = converter.Convert(); err != nil {
-		log.Fatalf("Error during conversion: %v", err)
-	}
-
-	engine := generate.NewEncoder()
-
-	protoContent := engine.ConvertToProtoFile(converter.ProtoFile)
-
-	protoFilename := defaultProtoFilename
-	if len(os.Args) > 2 {
-		protoFilename = os.Args[2]
-	}
-
-	protoFile, err := os.Create(protoFilename)
-	if err != nil {
-		log.Fatalf("Failed to create Proto file: %v", err)
-	}
-	defer func() {
-		if err := protoFile.Close(); err != nil {
-			log.Printf("Error closing Proto file: %v", err)
-		}
-	}()
-
-	if _, err = protoFile.WriteString(protoContent); err != nil {
-		log.Fatalf("Error writing to Proto file: %v", err)
+		log.Fatal(err)
 	}
 }
