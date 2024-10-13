@@ -8,6 +8,10 @@ import (
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/utils"
 )
 
+const (
+	openapiThriftFile = "openapi.thrift"
+)
+
 // ThriftConverter struct, used to convert OpenAPI specifications into Thrift files
 type ThriftConverter struct {
 	spec            *openapi3.T
@@ -39,6 +43,12 @@ func (c *ThriftConverter) Convert() error {
 		return fmt.Errorf("error parsing extensions to proto options: %w", err)
 	}
 
+	// Convert tags into Thrift services
+	err = c.convertTagsToThriftServices()
+	if err != nil {
+		return fmt.Errorf("error converting tags to thrift services: %w", err)
+	}
+
 	// Convert components into Thrift messages
 	err = c.convertComponentsToThriftMessages()
 	if err != nil {
@@ -51,18 +61,36 @@ func (c *ThriftConverter) Convert() error {
 		return fmt.Errorf("error converting paths to thrift services: %w", err)
 	}
 
-	//if c.converterOption.OpenapiOption {
-	//	err = c.addOptionsToThrift(c.spec)
-	//	if err != nil {
-	//		return fmt.Errorf("error parse options to thrift: %w", err)
-	//	}
-	//}
+	if c.converterOption.OpenapiOption {
+		err = c.addOptionsToThrift()
+		if err != nil {
+			return fmt.Errorf("error adding options to thrift: %w", err)
+		}
+	}
 
 	return nil
 }
 
 func (c *ThriftConverter) GetIdl() interface{} {
 	return c.ThriftFile
+}
+
+// addOptionsToThrift adds options to the Thrift file
+func (c *ThriftConverter) addOptionsToThrift() error {
+	if len(c.ThriftFile.Services) > 0 {
+		if c.converterOption.OpenapiOption {
+			optionStr := utils.StructToOption(c.spec, "")
+
+			schemaOption := &thrift.Option{
+				Name:  openapiDocumentOption,
+				Value: optionStr,
+			}
+			c.ThriftFile.Services[0].Options = append(c.ThriftFile.Services[0].Options, schemaOption)
+			c.AddThriftInclude(openapiThriftFile)
+		}
+	}
+
+	return nil
 }
 
 // Add a new method to handle structured extensions
@@ -90,6 +118,20 @@ func (c *ThriftConverter) addExtensionsToProtoOptions() error {
 	return nil
 }
 
+// convertTagsToThriftServices converts OpenAPI tags into Thrift services and stores them in the ThriftFile
+func (c *ThriftConverter) convertTagsToThriftServices() error {
+	tags := c.spec.Tags
+	for _, tag := range tags {
+		serviceName := utils.ToPascaleCase(tag.Name)
+		service := &thrift.ThriftService{
+			Name:        serviceName,
+			Description: tag.Description,
+		}
+		c.ThriftFile.Services = append(c.ThriftFile.Services, service)
+	}
+	return nil
+}
+
 // convertComponentsToThriftMessages converts OpenAPI components into Thrift messages and stores them in the ThriftFile
 func (c *ThriftConverter) convertComponentsToThriftMessages() error {
 	components := c.spec.Components
@@ -101,23 +143,65 @@ func (c *ThriftConverter) convertComponentsToThriftMessages() error {
 	}
 	for name, schemaRef := range components.Schemas {
 		schema := schemaRef
-		fieldOrMessage, err := c.ConvertSchemaToThriftType(schema, name, nil)
+		if c.converterOption.NamingOption {
+			name = utils.ToPascaleCase(name)
+		}
+		thriftType, err := c.ConvertSchemaToThriftType(schema, name, nil)
 		if err != nil {
 			return fmt.Errorf("error converting schema %s: %w", name, err)
 		}
-		switch v := fieldOrMessage.(type) {
+		switch v := thriftType.(type) {
 		case *thrift.ThriftField:
 			message := &thrift.ThriftStruct{
 				Name:   name,
 				Fields: []*thrift.ThriftField{v},
 			}
+			if c.converterOption.OpenapiOption {
+				optionStr := utils.StructToOption(schema.Value, "    ")
 
+				schemaOption := &thrift.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				message.Options = append(message.Options, schemaOption)
+				c.AddThriftInclude(openapiThriftFile)
+			}
 			c.addMessageToThrift(message)
 		case *thrift.ThriftStruct:
+			if c.converterOption.OpenapiOption {
+				optionStr := utils.StructToOption(schema.Value, "    ")
+
+				schemaOption := &thrift.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				v.Options = append(v.Options, schemaOption)
+				c.AddThriftInclude(openapiThriftFile)
+			}
 			c.addMessageToThrift(v)
 		case *thrift.ThriftEnum:
+			if c.converterOption.OpenapiOption {
+				optionStr := utils.StructToOption(schema.Value, "    ")
+
+				schemaOption := &thrift.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				v.Options = append(v.Options, schemaOption)
+				c.AddThriftInclude(openapiThriftFile)
+			}
 			c.addEnumToThrift(v)
 		case *thrift.ThriftUnion:
+			if c.converterOption.OpenapiOption {
+				optionStr := utils.StructToOption(schema.Value, "    ")
+
+				schemaOption := &thrift.Option{
+					Name:  openapiSchemaOption,
+					Value: optionStr,
+				}
+				v.Options = append(v.Options, schemaOption)
+				c.AddThriftInclude(openapiThriftFile)
+			}
 			c.addUnionToThrift(v)
 		}
 	}
@@ -143,26 +227,24 @@ func (c *ThriftConverter) ConvertPathsToThriftServices(paths *openapi3.Paths) ([
 	for path, pathItem := range paths.Map() {
 		for method, operation := range pathItem.Operations() {
 			serviceName := utils.GetServiceName(operation)
-
 			methodName := utils.GetMethodName(operation, path, method)
 
 			if c.converterOption.NamingOption {
+				serviceName = utils.ToPascaleCase(serviceName)
 				methodName = utils.ToPascaleCase(methodName)
-			} else {
-				methodName = utils.ToUpperFirstLetter(methodName)
 			}
 
-			inputMessage, err := c.generateRequestMessage(operation)
+			inputMessage, err := c.generateRequestMessage(operation, methodName)
 			if err != nil {
 				return nil, fmt.Errorf("error generating request message for %s: %w", methodName, err)
 			}
 
-			outputMessage, err := c.generateResponseMessage(operation)
+			outputMessage, err := c.generateResponseMessage(operation, methodName)
 			if err != nil {
 				return nil, fmt.Errorf("error generating response message for %s: %w", methodName, err)
 			}
 
-			service := c.findOrCreateService(&services, serviceName)
+			service := c.findOrCreateService(serviceName)
 
 			if !c.methodExistsInService(service, methodName) {
 				thriftMethod := &thrift.ThriftMethod{
@@ -181,16 +263,16 @@ func (c *ThriftConverter) ConvertPathsToThriftServices(paths *openapi3.Paths) ([
 					}
 				}
 
-				//if c.converterOption.OpenapiOption {
-				//	optionStr := utils.StructToThrift(operation, "     ")
-				//
-				//	schemaOption := &thrift.Option{
-				//		Name:  "openapi.operation",
-				//		Value: optionStr,
-				//	}
-				//	thriftMethod.Options = append(thriftMethod.Options, schemaOption)
-				//	c.AddThriftInclude(openapiThriftFile)
-				//}
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(operation, "     ")
+
+					schemaOption := &thrift.Option{
+						Name:  "openapi.operation",
+						Value: optionStr,
+					}
+					thriftMethod.Options = append(thriftMethod.Options, schemaOption)
+					c.AddThriftInclude(openapiThriftFile)
+				}
 				service.Methods = append(service.Methods, thriftMethod)
 			}
 		}
@@ -200,22 +282,22 @@ func (c *ThriftConverter) ConvertPathsToThriftServices(paths *openapi3.Paths) ([
 }
 
 // generateRequestMessage generates a request message for an operation
-func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) ([]string, error) {
-	messageName := operation.OperationID + "Request"
+func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation, methodName string) ([]string, error) {
+	messageName := utils.GetMessageName(operation, methodName, "Request")
+
 	if c.converterOption.NamingOption {
 		messageName = utils.ToPascaleCase(messageName)
-	} else {
-		messageName = utils.ToUpperFirstLetter(messageName)
 	}
+
 	message := &thrift.ThriftStruct{Name: messageName}
 
 	if operation.RequestBody == nil && len(operation.Parameters) == 0 {
-		//c.AddThriftInclude(emptyThriftFile)
 		return []string{""}, nil
 	}
 
 	if operation.RequestBody != nil {
 		if operation.RequestBody.Ref != "" {
+			//todo
 			return []string{utils.ExtractMessageNameFromRef(operation.RequestBody.Ref)}, nil
 		}
 
@@ -223,7 +305,7 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 			for mediaTypeStr, mediaType := range operation.RequestBody.Value.Content {
 				schema := mediaType.Schema
 				if schema != nil {
-					thriftType, err := c.ConvertSchemaToThriftType(schema, utils.FormatNaming(mediaTypeStr), message)
+					thriftType, err := c.ConvertSchemaToThriftType(schema, utils.FormatStr(mediaTypeStr), message)
 					if err != nil {
 						return []string{""}, err
 					}
@@ -263,18 +345,15 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 							}
 							c.addFieldIfNotExists(&message.Fields, field)
 						}
-						//for _, enum := range v.Enums {
-						//	message.Enums = append(message.Enums, enum)
-						//}
 					case *thrift.ThriftEnum:
 						name := mediaTypeStr
 						if c.converterOption.NamingOption {
-							name = utils.ToPascaleCase(name)
+							name = utils.ToSnakeCase(name)
 						} else {
-							name = utils.FormatNaming(name)
+							name = utils.FormatStr(name)
 						}
 						newField := &thrift.ThriftField{
-							Name: name,
+							Name: name + "_field",
 							Type: v.Name,
 						}
 						if c.converterOption.ApiOption {
@@ -291,10 +370,53 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 								})
 							}
 						}
-						//message.Enums = append(message.Enums, v)
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(operation.RequestBody.Value, "     ")
+
+							schemaOption := &thrift.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							newField.Options = append(newField.Options, schemaOption)
+							c.AddThriftInclude(openapiThriftFile)
+						}
 						message.Fields = append(message.Fields, newField)
 					case *thrift.ThriftUnion:
+						name := mediaTypeStr
+						if c.converterOption.NamingOption {
+							name = utils.ToSnakeCase(name)
+						} else {
+							name = utils.FormatStr(name)
+						}
+						newField := &thrift.ThriftField{
+							Name: name + "_field",
+							Type: v.Name,
+						}
+						if c.converterOption.ApiOption {
+							var optionName string
+							if mediaTypeStr == "application/json" {
+								optionName = "api.body"
+							} else if mediaTypeStr == "application/x-www-form-urlencoded" || mediaTypeStr == "multipart/form-data" {
+								optionName = "api.form"
+							}
+							if optionName != "" {
+								newField.Options = append(newField.Options, &thrift.Option{
+									Name:  optionName,
+									Value: fmt.Sprintf("%q", v.Name),
+								})
+							}
+						}
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(operation.RequestBody.Value, "     ")
 
+							schemaOption := &thrift.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							newField.Options = append(newField.Options, schemaOption)
+							c.AddThriftInclude(openapiThriftFile)
+						}
+						message.Fields = append(message.Fields, newField)
 					}
 				}
 			}
@@ -317,16 +439,17 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 							Value: fmt.Sprintf("%q", param.Value.Name),
 						})
 					}
-					//if c.converterOption.OpenapiOption {
-					//	optionStr := utils.StructToThrift(param.Value, "     ")
-					//
-					//	schemaOption := &thrift.Option{
-					//		Name:  "openapi.parameter",
-					//		Value: optionStr,
-					//	}
-					//	v.Options = append(v.Options, schemaOption)
-					//	c.AddThriftInclude(openapiThriftFile)
-					//}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(param.Value, "     ")
+
+						schemaOption := &thrift.Option{
+							Name:  openapiParameterOption,
+							Value: optionStr,
+						}
+						v.Options = append(v.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
+					}
+					v.Description = param.Value.Description
 					c.addFieldIfNotExists(&message.Fields, v)
 				case *thrift.ThriftStruct:
 					for _, field := range v.Fields {
@@ -336,27 +459,24 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 								Value: fmt.Sprintf("%q", param.Value.Name),
 							})
 						}
-						//if c.converterOption.OpenapiOption {
-						//	optionStr := utils.StructToThrift(param.Value, "     ")
-						//
-						//	schemaOption := &thrift.Option{
-						//		Name:  "openapi.parameter",
-						//		Value: optionStr,
-						//	}
-						//	field.Options = append(field.Options, schemaOption)
-						//	c.AddThriftInclude(openapiThriftFile)
-						//}
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(param.Value, "     ")
+
+							schemaOption := &thrift.Option{
+								Name:  openapiParameterOption,
+								Value: optionStr,
+							}
+							field.Options = append(field.Options, schemaOption)
+							c.AddThriftInclude(openapiThriftFile)
+						}
 						c.addFieldIfNotExists(&message.Fields, field)
 					}
-					//for _, enum := range v.Enums {
-					//	message.Enums = append(message.Enums, enum)
-					//}
 				case *thrift.ThriftEnum:
+
+				case *thrift.ThriftUnion:
 					name := param.Value.Name
 					if c.converterOption.NamingOption {
 						name = utils.ToPascaleCase(name)
-					} else {
-						name = utils.ToUpperFirstLetter(name)
 					}
 					newField := &thrift.ThriftField{
 						Name: name,
@@ -367,22 +487,18 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 							Name:  "api." + param.Value.In,
 							Value: fmt.Sprintf("%q", param.Value.Name),
 						})
-						//c.AddThriftInclude(apiThriftFile)
 					}
-					//if c.converterOption.OpenapiOption {
-					//	optionStr := utils.StructToThrift(param.Value, "     ")
-					//
-					//	schemaOption := &thrift.Option{
-					//		Name:  "openapi.parameter",
-					//		Value: optionStr,
-					//	}
-					//	newField.Options = append(newField.Options, schemaOption)
-					//	c.AddThriftInclude(openapiThriftFile)
-					//}
-					//message.Enums = append(message.Enums, v)
-					message.Fields = append(message.Fields, newField)
-				case *thrift.ThriftUnion:
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(param.Value, "     ")
 
+						schemaOption := &thrift.Option{
+							Name:  openapiParameterOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
+					}
+					message.Fields = append(message.Fields, newField)
 				}
 			}
 		}
@@ -398,7 +514,7 @@ func (c *ThriftConverter) generateRequestMessage(operation *openapi3.Operation) 
 }
 
 // generateResponseMessage generates a response message for an operation
-func (c *ThriftConverter) generateResponseMessage(operation *openapi3.Operation) (string, error) {
+func (c *ThriftConverter) generateResponseMessage(operation *openapi3.Operation, methodName string) (string, error) {
 	if operation.Responses == nil {
 		return "", nil
 	}
@@ -413,22 +529,24 @@ func (c *ThriftConverter) generateResponseMessage(operation *openapi3.Operation)
 	}
 
 	if responseCount == 1 {
-		for statusCode, responseRef := range responses {
+		for _, responseRef := range responses {
 			if responseRef.Ref == "" && (responseRef.Value == nil || (len(responseRef.Value.Content) == 0 && len(responseRef.Value.Headers) == 0)) {
-				//c.AddThriftInclude(emptyThriftFile)
-				return "void", nil
+				continue
 			}
-			return c.processSingleResponse(statusCode, responseRef, operation)
+			return c.processSingleResponse("", responseRef, operation, methodName)
 		}
 	}
 
+	if responseCount == 0 {
+		return "void", nil
+	}
+
 	// create a wrapper message for multiple responses
-	wrapperMessageName := operation.OperationID + "Response"
+	wrapperMessageName := utils.GetMessageName(operation, methodName, "Response")
 	if c.converterOption.NamingOption {
 		wrapperMessageName = utils.ToPascaleCase(wrapperMessageName)
-	} else {
-		wrapperMessageName = utils.ToUpperFirstLetter(wrapperMessageName)
 	}
+
 	wrapperMessage := &thrift.ThriftStruct{Name: wrapperMessageName}
 
 	emptyFlag := true
@@ -438,16 +556,14 @@ func (c *ThriftConverter) generateResponseMessage(operation *openapi3.Operation)
 			break
 		}
 		emptyFlag = false
-		messageName, err := c.processSingleResponse(statusCode, responseRef, operation)
+		messageName, err := c.processSingleResponse(statusCode, responseRef, operation, methodName)
 		if err != nil {
 			return "", err
 		}
 
 		name := "Response_" + statusCode
 		if c.converterOption.NamingOption {
-			name = utils.ToPascaleCase(name)
-		} else {
-			name = utils.ToUpperFirstLetter(name)
+			name = utils.ToSnakeCase(name)
 		}
 		field := &thrift.ThriftField{
 			Name: name,
@@ -467,18 +583,18 @@ func (c *ThriftConverter) generateResponseMessage(operation *openapi3.Operation)
 }
 
 // processSingleResponse deals with a single response in an operation
-func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *openapi3.ResponseRef, operation *openapi3.Operation) (string, error) {
+func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *openapi3.ResponseRef, operation *openapi3.Operation, methodName string) (string, error) {
 	if responseRef.Ref != "" {
 		return utils.ExtractMessageNameFromRef(responseRef.Ref), nil
 	}
 
 	response := responseRef.Value
-	messageName := operation.OperationID + "Response" + utils.ToUpperFirstLetter(statusCode)
+	messageName := operation.OperationID + "Response" + utils.ToUpperCase(statusCode)
+
 	if c.converterOption.NamingOption {
 		messageName = utils.ToPascaleCase(messageName)
-	} else {
-		messageName = utils.ToUpperFirstLetter(messageName)
 	}
+
 	message := &thrift.ThriftStruct{Name: messageName}
 
 	if len(response.Headers) > 0 {
@@ -498,7 +614,16 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 							Value: fmt.Sprintf("%q", headerName),
 						}
 						v.Options = append(v.Options, option)
-						//c.AddThriftInclude(apiThriftFile)
+					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+						schemaOption := &thrift.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						v.Options = append(v.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
 					}
 					c.addFieldIfNotExists(&message.Fields, v)
 				case *thrift.ThriftStruct:
@@ -509,25 +634,26 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 								Value: fmt.Sprintf("%q", field.Name),
 							}
 							field.Options = append(field.Options, option)
-							//c.AddThriftInclude(apiThriftFile)
+						}
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+							schemaOption := &thrift.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							field.Options = append(field.Options, schemaOption)
+							c.AddThriftInclude(openapiThriftFile)
 						}
 						c.addFieldIfNotExists(&message.Fields, field)
 					}
-					//for _, enum := range v.Enums {
-					//	message.Enums = append(message.Enums, enum)
-					//}
-					//for _, nestedMessage := range v.Structs {
-					//	c.addMessageIfNotExists(&message.Structs, nestedMessage)
-					//}
 				case *thrift.ThriftEnum:
 					name := headerName
 					if c.converterOption.NamingOption {
 						name = utils.ToSnakeCase(name)
-					} else {
-						name = utils.ToUpperFirstLetter(name)
 					}
 					newField := &thrift.ThriftField{
-						Name: name,
+						Name: name + "_field",
 						Type: v.Name,
 					}
 					if c.converterOption.ApiOption {
@@ -536,11 +662,45 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 							Value: fmt.Sprintf("%q", headerName),
 						}
 						newField.Options = append(newField.Options, option)
-						//c.AddThriftInclude(apiThriftFile)
 					}
-					//message.Enums = append(message.Enums, v)
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+						schemaOption := &thrift.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
+					}
 					message.Fields = append(message.Fields, newField)
 				case *thrift.ThriftUnion:
+					name := headerName
+					if c.converterOption.NamingOption {
+						name = utils.ToSnakeCase(name)
+					}
+					newField := &thrift.ThriftField{
+						Name: name + "_field",
+						Type: v.Name,
+					}
+					if c.converterOption.ApiOption {
+						option := &thrift.Option{
+							Name:  "api.header",
+							Value: fmt.Sprintf("%q", headerName),
+						}
+						newField.Options = append(newField.Options, option)
+					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+						schemaOption := &thrift.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
+					}
+					message.Fields = append(message.Fields, newField)
 				}
 			}
 		}
@@ -550,7 +710,7 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 		schema := mediaType.Schema
 		if schema != nil {
 
-			thriftType, err := c.ConvertSchemaToThriftType(schema, utils.FormatNaming(mediaTypeStr), message)
+			thriftType, err := c.ConvertSchemaToThriftType(schema, utils.FormatStr(mediaTypeStr), message)
 			if err != nil {
 				return "", err
 			}
@@ -563,7 +723,6 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 						Value: fmt.Sprintf("%q", v.Name),
 					}
 					v.Options = append(v.Options, option)
-					//c.AddThriftInclude(apiThriftFile)
 				}
 				c.addFieldIfNotExists(&message.Fields, v)
 			case *thrift.ThriftStruct:
@@ -574,22 +733,25 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 							Value: fmt.Sprintf("%q", field.Name),
 						}
 						field.Options = append(field.Options, option)
-						//c.AddThriftInclude(apiThriftFile)
+					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(schema, "     ")
+
+						schemaOption := &thrift.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						field.Options = append(field.Options, schemaOption)
+						c.AddThriftInclude(openapiThriftFile)
 					}
 					c.addFieldIfNotExists(&message.Fields, field)
 				}
-				//for _, enum := range v.Enums {
-				//	message.Enums = append(message.Enums, enum)
-				//}
-				//for _, nestedMessage := range v.Structs {
-				//	c.addMessageIfNotExists(&message.Structs, nestedMessage)
-				//}
 			case *thrift.ThriftEnum:
 				name := mediaTypeStr
 				if c.converterOption.NamingOption {
 					name = utils.ToSnakeCase(mediaTypeStr)
 				} else {
-					name = utils.ToUpperFirstLetter(name)
+					name = utils.ToUpperCase(name)
 				}
 				newField := &thrift.ThriftField{
 					Name: name,
@@ -601,11 +763,47 @@ func (c *ThriftConverter) processSingleResponse(statusCode string, responseRef *
 						Value: fmt.Sprintf("%q", v.Name),
 					}
 					newField.Options = append(newField.Options, option)
-					//c.AddThriftInclude(apiThriftFile)
 				}
-				//message.Enums = append(message.Enums, v)
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(schema, "     ")
+
+					schemaOption := &thrift.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddThriftInclude(openapiThriftFile)
+				}
 				message.Fields = append(message.Fields, newField)
 			case *thrift.ThriftUnion:
+				name := mediaTypeStr
+				if c.converterOption.NamingOption {
+					name = utils.ToSnakeCase(mediaTypeStr)
+				} else {
+					name = utils.ToUpperCase(name)
+				}
+				newField := &thrift.ThriftField{
+					Name: name,
+					Type: v.Name,
+				}
+				if c.converterOption.ApiOption && mediaTypeStr == "application/json" {
+					option := &thrift.Option{
+						Name:  "api.body",
+						Value: fmt.Sprintf("%q", v.Name),
+					}
+					newField.Options = append(newField.Options, option)
+				}
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(schema, "     ")
+
+					schemaOption := &thrift.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddThriftInclude(openapiThriftFile)
+				}
+				message.Fields = append(message.Fields, newField)
 			}
 		}
 	}
@@ -641,6 +839,7 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 	}
 
 	schema := schemaRef.Value
+	description := schema.Description
 
 	// Handle oneOf, allOf, anyOf even if schema.Type is nil
 	if len(schema.OneOf) > 0 {
@@ -675,10 +874,11 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 			if parentMessage == nil {
 				name = thriftName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(thriftName))
+				name = c.applyNamingOption(utils.ToUpperCase(thriftName))
 			}
 			thriftEnum := &thrift.ThriftEnum{
-				Name: name,
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				thriftEnum.Values = append(thriftEnum.Values, &thrift.ThriftEnumValue{
@@ -697,10 +897,11 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 			if parentMessage == nil {
 				name = thriftName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(thriftName))
+				name = c.applyNamingOption(utils.ToUpperCase(thriftName))
 			}
 			thriftEnum := &thrift.ThriftEnum{
-				Name: name,
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				thriftEnum.Values = append(thriftEnum.Values, &thrift.ThriftEnumValue{
@@ -721,10 +922,11 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 			if parentMessage == nil {
 				name = thriftName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(thriftName))
+				name = c.applyNamingOption(utils.ToUpperCase(thriftName))
 			}
 			thriftEnum := &thrift.ThriftEnum{
-				Name: name,
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				thriftEnum.Values = append(thriftEnum.Values, &thrift.ThriftEnumValue{
@@ -764,9 +966,10 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 			}
 
 			result = &thrift.ThriftField{
-				Name:     c.applyNamingOption(thriftName),
-				Type:     fieldType,
-				Repeated: true,
+				Name:        c.applyNamingOption(thriftName),
+				Type:        fieldType,
+				Repeated:    true,
+				Description: description,
 			}
 		}
 
@@ -777,7 +980,7 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 		if parentMessage == nil {
 			message = &thrift.ThriftStruct{Name: thriftName}
 		} else {
-			message = &thrift.ThriftStruct{Name: c.applyNamingOption(utils.ToUpperFirstLetter(thriftName))}
+			message = &thrift.ThriftStruct{Name: c.applyNamingOption(utils.ToUpperCase(thriftName))}
 		}
 
 		// Process each property in the object
@@ -789,11 +992,35 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 
 			// Add the converted fields to the message
 			if field, ok := thriftType.(*thrift.ThriftField); ok {
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(propSchema, "    ")
+
+					schemaOption := &thrift.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					field.Options = append(field.Options, schemaOption)
+					c.AddThriftInclude(openapiThriftFile)
+				}
 				message.Fields = append(message.Fields, field)
 			} else if nestedMessage, ok := thriftType.(*thrift.ThriftStruct); ok {
+				var name string
+				if c.converterOption.NamingOption {
+					name = utils.ToSnakeCase(nestedMessage.Name)
+				}
 				newField := &thrift.ThriftField{
-					Name: c.applyNamingOption(propName),
+					Name: name + "_field",
 					Type: nestedMessage.Name,
+				}
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(propSchema.Value, "    ")
+
+					schemaOption := &thrift.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddThriftInclude(openapiThriftFile)
 				}
 				c.addMessageToThrift(nestedMessage)
 				message.Fields = append(message.Fields, newField)
@@ -832,14 +1059,16 @@ func (c *ThriftConverter) ConvertSchemaToThriftType(
 		}
 
 		// Set the result as the final message
+		message.Description = description
 		result = message
 	}
 
 	// If result is still nil, construct a default ThriftField
 	if result == nil {
 		result = &thrift.ThriftField{
-			Name: c.applyNamingOption(thriftName),
-			Type: thriftType,
+			Name:        c.applyNamingOption(thriftName),
+			Type:        thriftType,
+			Description: description,
 		}
 	}
 
@@ -863,21 +1092,21 @@ func (c *ThriftConverter) handleOneOf(oneOfSchemas []*openapi3.SchemaRef, thrift
 			oneOfUnion.Fields = append(oneOfUnion.Fields, v)
 		case *thrift.ThriftStruct:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addMessageToThrift(v)
 			oneOfUnion.Fields = append(oneOfUnion.Fields, newField)
 		case *thrift.ThriftEnum:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addEnumToThrift(v)
 			oneOfUnion.Fields = append(oneOfUnion.Fields, newField)
 		case *thrift.ThriftUnion:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addUnionToThrift(v)
@@ -905,21 +1134,21 @@ func (c *ThriftConverter) handleAllOf(allOfSchemas []*openapi3.SchemaRef, thrift
 			allOfStruct.Fields = append(allOfStruct.Fields, v)
 		case *thrift.ThriftStruct:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addMessageToThrift(v)
 			allOfStruct.Fields = append(allOfStruct.Fields, newField)
 		case *thrift.ThriftEnum:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addEnumToThrift(v)
 			allOfStruct.Fields = append(allOfStruct.Fields, newField)
 		case *thrift.ThriftUnion:
 			newField := &thrift.ThriftField{
-				Name: v.Name,
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addUnionToThrift(v)
@@ -947,21 +1176,21 @@ func (c *ThriftConverter) handleAnyOf(anyOfSchemas []*openapi3.SchemaRef, thrift
 			anyOfStruct.Fields = append(anyOfStruct.Fields, v)
 		case *thrift.ThriftStruct:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addMessageToThrift(v)
 			anyOfStruct.Fields = append(anyOfStruct.Fields, newField)
 		case *thrift.ThriftEnum:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addEnumToThrift(v)
 			anyOfStruct.Fields = append(anyOfStruct.Fields, newField)
 		case *thrift.ThriftUnion:
 			newField := &thrift.ThriftField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addUnionToThrift(v)
@@ -977,7 +1206,7 @@ func (c *ThriftConverter) applyNamingOption(name string) string {
 	if c.converterOption.NamingOption {
 		return utils.ToPascaleCase(name)
 	}
-	return utils.ToUpperFirstLetter(name)
+	return name
 }
 
 // addMessageToThrift adds a ThriftStruct to the ThriftFile globally
@@ -1061,14 +1290,15 @@ func (c *ThriftConverter) methodExistsInService(service *thrift.ThriftService, m
 }
 
 // findOrCreateService finds or creates a service
-func (c *ThriftConverter) findOrCreateService(services *[]*thrift.ThriftService, serviceName string) *thrift.ThriftService {
-	for i := range *services {
-		if (*services)[i].Name == serviceName {
-			return (*services)[i]
+func (c *ThriftConverter) findOrCreateService(serviceName string) *thrift.ThriftService {
+	for i := range c.ThriftFile.Services {
+		if c.ThriftFile.Services[i].Name == serviceName {
+			return c.ThriftFile.Services[i]
 		}
 	}
 
+	// If no existing service is found, create a new one
 	newService := &thrift.ThriftService{Name: serviceName}
-	*services = append(*services, newService)
-	return (*services)[len(*services)-1]
+	c.ThriftFile.Services = append(c.ThriftFile.Services, newService)
+	return newService
 }

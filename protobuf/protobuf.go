@@ -28,20 +28,22 @@ type ProtoFile struct {
 
 // ProtoMessage represents a Proto message
 type ProtoMessage struct {
-	Name     string
-	Fields   []*ProtoField   // List of fields in the Proto message
-	Messages []*ProtoMessage // Nested Proto messages
-	Enums    []*ProtoEnum    // Enums within the Proto message
-	OneOfs   []*ProtoOneOf   // OneOfs within the Proto message
-	Options  []*Option       // Options specific to this Proto message
+	Name        string
+	Description string          // Description for the Proto message
+	Fields      []*ProtoField   // List of fields in the Proto message
+	Messages    []*ProtoMessage // Nested Proto messages
+	Enums       []*ProtoEnum    // Enums within the Proto message
+	OneOfs      []*ProtoOneOf   // OneOfs within the Proto message
+	Options     []*Option       // Options specific to this Proto message
 }
 
 // ProtoField represents a field in a Proto message
 type ProtoField struct {
-	Name     string
-	Type     string
-	Repeated bool      // Indicates if the field is repeated (array)
-	Options  []*Option // Additional options for this field
+	Name        string
+	Type        string
+	Description string
+	Repeated    bool      // Indicates if the field is repeated (array)
+	Options     []*Option // Additional options for this field
 }
 
 // Option represents an option in a Proto field or message
@@ -52,24 +54,27 @@ type Option struct {
 
 // ProtoMethod represents a method in a Proto service
 type ProtoMethod struct {
-	Name    string
-	Input   string    // Input message type
-	Output  string    // Output message type
-	Options []*Option // Options for the method
+	Name        string
+	Description string
+	Input       string    // Input message type
+	Output      string    // Output message type
+	Options     []*Option // Options for the method
 }
 
 // ProtoService represents a Proto service
 type ProtoService struct {
-	Name    string         // Name of the service
-	Methods []*ProtoMethod // List of methods in the service
-	Options []*Option      // Service-level options
+	Name        string // Name of the service
+	Description string
+	Methods     []*ProtoMethod // List of methods in the service
+	Options     []*Option      // Service-level options
 }
 
 // ProtoEnum represents a Proto enum
 type ProtoEnum struct {
-	Name    string            // Name of the enum
-	Values  []*ProtoEnumValue // Values within the enum
-	Options []*Option         // Enum-level options
+	Name        string            // Name of the enum
+	Description string            // Description for the enum
+	Values      []*ProtoEnumValue // Values within the enum
+	Options     []*Option         // Enum-level options
 }
 
 // ProtoEnumValue represents a value in a Proto enum

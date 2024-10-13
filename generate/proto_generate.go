@@ -88,6 +88,9 @@ func (e *ProtoGenerate) Generate(fileContent interface{}) (string, error) {
 
 	// Generate services
 	for _, service := range protoFile.Services {
+		if service.Description != "" {
+			e.dst.WriteString(fmt.Sprintf("// %s\n", service.Description))
+		}
 		e.dst.WriteString(fmt.Sprintf("service %s {\n", service.Name))
 
 		// Sort methods by name
@@ -96,6 +99,9 @@ func (e *ProtoGenerate) Generate(fileContent interface{}) (string, error) {
 		})
 
 		for _, method := range service.Methods {
+			if method.Description != "" {
+				e.dst.WriteString(fmt.Sprintf("  // %s\n", method.Description))
+			}
 			e.dst.WriteString(fmt.Sprintf("  rpc %s(%s) returns (%s)", method.Name, method.Input, method.Output))
 			if len(method.Options) > 0 {
 				sort.Slice(method.Options, func(i, j int) bool {
@@ -125,15 +131,12 @@ func (e *ProtoGenerate) encodeEnum(enum *protobuf.ProtoEnum, indentLevel int) {
 
 	// Generate enum values
 	for _, value := range enum.Values {
-		// Convert the value to a string
 		valueStr := fmt.Sprintf("%v", value.Value)
-
-		// Check if the value is a number and generate a name if necessary
 		enumValueName := valueStr
 		if _, err := strconv.Atoi(valueStr); err == nil {
 			enumValueName = fmt.Sprintf("%s%s", enum.Name, valueStr)
 		}
-
+		enumValueName = strings.ToUpper(utils.FormatStr(enumValueName))
 		e.dst.WriteString(fmt.Sprintf("%s  %s = %d;\n", indent, enumValueName, value.Index))
 	}
 
@@ -146,6 +149,9 @@ func (e *ProtoGenerate) encodeMessage(message *protobuf.ProtoMessage, indentLeve
 		e.dst.WriteString("\n")
 	}
 	indent := strings.Repeat("  ", indentLevel)
+	if message.Description != "" {
+		e.dst.WriteString(fmt.Sprintf("%s// %s\n", indent, message.Description))
+	}
 	e.dst.WriteString(fmt.Sprintf("%smessage %s {\n", indent, message.Name))
 
 	// Generate message-level options
@@ -170,11 +176,15 @@ func (e *ProtoGenerate) encodeMessage(message *protobuf.ProtoMessage, indentLeve
 
 	// Generate fields
 	for _, field := range message.Fields {
+		if field.Description != "" {
+			e.dst.WriteString(fmt.Sprintf("%s  // %s\n", indent, field.Description))
+		}
 		repeated := ""
 		if field.Repeated {
 			repeated = "repeated "
 		}
-		e.dst.WriteString(fmt.Sprintf("%s  %s%s %s = %d", indent, repeated, field.Type, field.Name, fieldNumber))
+
+		e.dst.WriteString(fmt.Sprintf("%s  %s%s %s = %d", indent, repeated, field.Type, utils.FormatStr(field.Name), fieldNumber))
 		fieldNumber++
 
 		// Generate field-level options

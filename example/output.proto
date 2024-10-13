@@ -1,0 +1,251 @@
+syntax = "proto3";
+
+package example_swagger_doc;
+
+import "openapi/annotations.proto";
+import "api.proto";
+
+option openapi.document = {
+  openapi: "3.0.3";
+  info: {
+    title: "example swagger doc";
+    description: "HelloService1描述";
+    version: "Version from annotation";
+  };
+  servers: [
+    {
+      url: "http://localhost:8888";
+    }
+  ];
+  tags: [
+    {
+      name: "HelloService1";
+    }
+  ];
+};
+
+enum HelloRespBodyEnum {
+  BODY1 = 0;
+}
+
+message HelloService1_BodyMethodRequest {
+  string body = 1 [
+    (api.body) = "body",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "this is an override field schema title";
+       max_length: "255";
+     }
+  ];
+  // field: query描述
+  string query2 = 2 [
+    (api.query) = "query2",
+    (openapi.parameter) = {
+       name: "query2";
+       in: "query";
+       description: "field: query描述";
+     }
+  ];
+}
+
+message HelloService1_BodyMethodResponse {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "Hello - response";
+       description: "Hello - response";
+       enum: [
+         "body1"
+       ];
+       required: [
+         "body"
+       ];
+     }
+  ];
+  TokenEnum token_field = 2 [
+    (api.header) = "token",
+    (openapi.property) = {
+       parameter: {
+       };
+     }
+  ];
+
+  enum TokenEnum {
+    TOKEN1 = 0;
+    TOKEN2 = 1;
+  }
+
+}
+
+message HelloService1_FormMethodRequest {
+  string form1 = 1 [
+    (api.form) = "form1",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "this is an override field schema title";
+       max_length: "255";
+     }
+  ];
+}
+
+message HelloService1_FormMethodResponse {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "Hello - response";
+       description: "Hello - response";
+       enum: [
+         "body1"
+       ];
+       required: [
+         "body"
+       ];
+     }
+  ];
+  string token = 2 [
+    (api.header) = "token",
+    (openapi.property) = {
+       parameter: {
+       };
+     }
+  ];
+}
+
+message HelloService1_PathMethodRequest {
+  Path2Enum path2_field = 1 [
+    (api.path) = "path2",
+    (openapi.parameter) = {
+       name: "path2";
+       in: "path";
+       description: "field: path描述";
+       required: true;
+     }
+  ];
+
+  enum Path2Enum {
+    PATH1 = 0;
+  }
+
+}
+
+message HelloService1_PathMethodResponse {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "Hello - response";
+       description: "Hello - response";
+       enum: [
+         "body1"
+       ];
+       required: [
+         "body"
+       ];
+     }
+  ];
+  string token = 2 [
+    (api.header) = "token",
+    (openapi.property) = {
+       parameter: {
+       };
+     }
+  ];
+}
+
+message HelloService1_QueryMethod1Request {
+  repeated string items = 1 [
+    (api.query) = "items",
+    (openapi.parameter) = {
+       name: "items";
+       in: "query";
+     }
+  ];
+  // QueryValue描述
+  string query2 = 2 [
+    (api.query) = "query2",
+    (openapi.parameter) = {
+       name: "query2";
+       in: "query";
+       description: "QueryValue描述";
+       required: true;
+     }
+  ];
+}
+
+message HelloService1_QueryMethod1Response {
+  HelloRespBody HelloRespBody = 1 [
+    (api.body) = "HelloRespBody",
+    (openapi.property) = {
+       type: [
+         "string"
+       ];
+       title: "Hello - response";
+       description: "Hello - response";
+       enum: [
+         "body1"
+       ];
+       required: [
+         "body"
+       ];
+     }
+  ];
+  string token = 2 [
+    (api.header) = "token",
+    (openapi.property) = {
+       parameter: {
+       };
+     }
+  ];
+}
+
+service HelloService1 {
+  rpc HelloService1_BodyMethod(HelloService1_BodyMethodRequest) returns (HelloService1_BodyMethodResponse) {
+     option (api.post) = "/body";
+     option (openapi.operation) = {
+       tags: [
+         "HelloService1"
+       ];
+       operation_id: "HelloService1_BodyMethod";
+     };
+  }
+  rpc HelloService1_FormMethod(HelloService1_FormMethodRequest) returns (HelloService1_FormMethodResponse) {
+     option (api.post) = "/form";
+     option (openapi.operation) = {
+       tags: [
+         "HelloService1"
+       ];
+       operation_id: "HelloService1_FormMethod";
+     };
+  }
+  rpc HelloService1_PathMethod(HelloService1_PathMethodRequest) returns (HelloService1_PathMethodResponse) {
+     option (api.get) = "/path:path1";
+     option (openapi.operation) = {
+       tags: [
+         "HelloService1"
+       ];
+       operation_id: "HelloService1_PathMethod";
+     };
+  }
+  rpc HelloService1_QueryMethod1(HelloService1_QueryMethod1Request) returns (HelloService1_QueryMethod1Response) {
+     option (api.get) = "/hello";
+     option (openapi.operation) = {
+       tags: [
+         "HelloService1"
+       ];
+       operation_id: "HelloService1_QueryMethod1";
+     };
+  }
+}
+

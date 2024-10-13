@@ -2,6 +2,7 @@ package generate
 
 import (
 	"fmt"
+	"github.com/hertz-contrib/swagger-generate/swagger2idl/utils"
 	"strconv"
 	"strings"
 
@@ -25,11 +26,14 @@ func (e *ThriftGenerate) Generate(fileContent interface{}) (string, error) {
 		return "", fmt.Errorf("invalid type: expected *ThriftFile")
 	}
 
-	// 写入 namespace
-	for language, ns := range thriftFile.Namespace {
-		e.dst.WriteString(fmt.Sprintf("namespace %s %s\n", language, ns))
+	if len(thriftFile.Namespace) == 0 {
+		e.dst.WriteString("namespace go example\n\n")
+	} else {
+		for language, ns := range thriftFile.Namespace {
+			e.dst.WriteString(fmt.Sprintf("namespace %s %s\n", language, ns))
+		}
+		e.dst.WriteString("\n")
 	}
-	e.dst.WriteString("\n")
 
 	// 生成 includes
 	for _, include := range thriftFile.Includes {
@@ -81,6 +85,7 @@ func (e *ThriftGenerate) encodeEnum(enum *thrift.ThriftEnum, indentLevel int) {
 			enumValueName = fmt.Sprintf("%s%s", enum.Name, valueStr)
 		}
 
+		enumValueName = strings.ToUpper(utils.FormatStr(enumValueName))
 		e.dst.WriteString(fmt.Sprintf("%s  %s = %d;\n", indent, enumValueName, value.Index))
 	}
 	e.dst.WriteString(fmt.Sprintf("%s}\n\n", indent))
@@ -89,7 +94,9 @@ func (e *ThriftGenerate) encodeEnum(enum *thrift.ThriftEnum, indentLevel int) {
 // encodeField 编码 struct 中的单个字段
 func (e *ThriftGenerate) encodeField(field *thrift.ThriftField, index int, indentLevel int) {
 	indent := strings.Repeat("    ", indentLevel)
-
+	if field.Description != "" {
+		e.dst.WriteString(fmt.Sprintf("%s  // %s\n", indent, field.Description))
+	}
 	// 字段编号和类型
 	fieldType := field.Type
 	if field.Repeated {
@@ -103,19 +110,18 @@ func (e *ThriftGenerate) encodeField(field *thrift.ThriftField, index int, inden
 	}
 
 	// 使用提供的 index 赋值给字段
-	e.dst.WriteString(fmt.Sprintf("%s%d: %s%s %s", indent, index, optionalFlag, fieldType, field.Name))
+	e.dst.WriteString(fmt.Sprintf("%s%d: %s%s %s", indent, index, optionalFlag, fieldType, utils.FormatStr(field.Name)))
 
 	// 字段选项
 	if len(field.Options) > 0 {
-		e.dst.WriteString(" (\n")
+		e.dst.WriteString(" (")
 		for i, option := range field.Options {
 			if i > 0 {
-				e.dst.WriteString(",\n")
+				e.dst.WriteString(",\n" + indent)
 			}
-			e.dst.WriteString(indent + "    ")
 			e.encodeOption(option)
 		}
-		e.dst.WriteString("\n" + indent + ")\n")
+		e.dst.WriteString(")\n") // 结束括号对齐字段
 	} else {
 		e.dst.WriteString("\n")
 	}
@@ -124,6 +130,9 @@ func (e *ThriftGenerate) encodeField(field *thrift.ThriftField, index int, inden
 // encodeMessage 递归编码 structs，包括嵌套的 structs 和 enums
 func (e *ThriftGenerate) encodeMessage(message *thrift.ThriftStruct, indentLevel int) {
 	indent := strings.Repeat("    ", indentLevel)
+	if message.Description != "" {
+		e.dst.WriteString(fmt.Sprintf("%s// %s\n", indent, message.Description))
+	}
 	e.dst.WriteString(fmt.Sprintf("%sstruct %s {\n", indent, message.Name))
 
 	// 字段：遍历字段并分配索引
@@ -131,23 +140,31 @@ func (e *ThriftGenerate) encodeMessage(message *thrift.ThriftStruct, indentLevel
 		e.encodeField(field, i+1, indentLevel+1) // `i+1` 分配基于1的索引
 	}
 
-	e.dst.WriteString(fmt.Sprintf("%s}\n\n", indent))
+	e.dst.WriteString(fmt.Sprintf("%s}", indent))
 
 	// struct 选项
 	if len(message.Options) > 0 {
-		e.dst.WriteString(indent + "(")
+		e.dst.WriteString(indent + "(\n")
 		for i, option := range message.Options {
 			if i > 0 {
-				e.dst.WriteString(", ")
+				e.dst.WriteString(",\n")
 			}
+			e.dst.WriteString(indent + "    ") // 增加缩进
 			e.encodeOption(option)
 		}
-		e.dst.WriteString(")\n")
+		e.dst.WriteString("\n" + indent + ")\n")
+	} else {
+		e.dst.WriteString("\n")
 	}
+	e.dst.WriteString("\n")
 }
 
 // encodeService 编码服务定义
 func (e *ThriftGenerate) encodeService(service *thrift.ThriftService) {
+	if service.Description != "" {
+		e.dst.WriteString(fmt.Sprintf("// %s\n", service.Description))
+	}
+
 	// 服务注释
 	e.dst.WriteString(fmt.Sprintf("service %s {\n", service.Name))
 
@@ -156,7 +173,7 @@ func (e *ThriftGenerate) encodeService(service *thrift.ThriftService) {
 		e.encodeMethod(method)
 	}
 
-	e.dst.WriteString("}\n\n")
+	e.dst.WriteString("}")
 
 	// 服务选项
 	if len(service.Options) > 0 {
@@ -168,7 +185,10 @@ func (e *ThriftGenerate) encodeService(service *thrift.ThriftService) {
 			e.encodeOption(option)
 		}
 		e.dst.WriteString(")\n")
+	} else {
+		e.dst.WriteString("\n")
 	}
+	e.dst.WriteString("\n")
 }
 
 // encodeUnion 编码 Thrift union
@@ -186,6 +206,9 @@ func (e *ThriftGenerate) encodeUnion(union *thrift.ThriftUnion, indentLevel int)
 
 // encodeMethod 编码服务中的方法
 func (e *ThriftGenerate) encodeMethod(method *thrift.ThriftMethod) {
+	if method.Description != "" {
+		e.dst.WriteString(fmt.Sprintf("  // %s\n", method.Description))
+	}
 	// 方法签名
 	e.dst.WriteString(fmt.Sprintf("    %s %s (", method.Output, method.Name))
 

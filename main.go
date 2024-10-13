@@ -42,18 +42,20 @@ func main() {
 			},
 			&cli.BoolFlag{
 				Name:        "openapi",
+				Aliases:     []string{"oa"},
 				Usage:       "Include OpenAPI specific options in the output",
 				Destination: &openapiOption,
 			},
 			&cli.BoolFlag{
 				Name:        "api",
+				Aliases:     []string{"a"},
 				Usage:       "Include API specific options in the output",
-				Value:       true,
 				Destination: &apiOption,
 			},
 			&cli.BoolFlag{
 				Name:        "naming",
-				Usage:       "Use PascalCase naming convention",
+				Aliases:     []string{"n"},
+				Usage:       "use naming conventions for the output IDL file",
 				Value:       true,
 				Destination: &namingOption,
 			},

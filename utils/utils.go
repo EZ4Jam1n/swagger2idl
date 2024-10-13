@@ -49,7 +49,7 @@ func Stringify(value interface{}) string {
 	}
 }
 
-func StructToProtobuf(value interface{}, indent string) string {
+func StructToOption(value interface{}, indent string) string {
 	var sb strings.Builder
 	v := reflect.ValueOf(value)
 	t := reflect.TypeOf(value)
@@ -71,7 +71,7 @@ func StructToProtobuf(value interface{}, indent string) string {
 		sb.WriteString("[\n")
 		for i := 0; i < v.Len(); i++ {
 			sb.WriteString(fmt.Sprintf("%s  ", indent))
-			sb.WriteString(StructToProtobuf(v.Index(i).Interface(), indent+"  "))
+			sb.WriteString(StructToOption(v.Index(i).Interface(), indent+"  "))
 			if i < v.Len()-1 {
 				sb.WriteString(",\n")
 			}
@@ -87,8 +87,11 @@ func StructToProtobuf(value interface{}, indent string) string {
 		}
 		sb.WriteString("{\n")
 		for _, key := range v.MapKeys() {
-			sb.WriteString(fmt.Sprintf("%s  %v: ", indent, key))
-			sb.WriteString(StructToProtobuf(v.MapIndex(key).Interface(), indent+"  "))
+			if isZeroValue(v.MapIndex(key)) {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("%s  %v: ", indent, reflect.ValueOf(ToSnakeCase(key.String()))))
+			sb.WriteString(StructToOption(v.MapIndex(key).Interface(), indent+"  "))
 			sb.WriteString(",\n")
 		}
 		sb.WriteString(fmt.Sprintf("%s}", indent))
@@ -123,15 +126,18 @@ func StructToProtobuf(value interface{}, indent string) string {
 				fieldName == "schemas" || fieldName == "requestBodies" || fieldName == "items" ||
 				fieldName == "paths" || fieldName == "properties" || fieldName == "content" ||
 				fieldName == "schema" || fieldName == "oneOf" || fieldName == "allOf" || fieldName == "anyOf" ||
-				fieldName == "additionalProperties" {
+				fieldName == "additionalProperties" || fieldName == "-" ||
+				fieldName == "components" {
 				continue
 			}
+
+			fieldName = ToSnakeCase(fieldName) // Convert field name to snake_case
 
 			// Use the field name as the Protobuf key
 			sb.WriteString(fmt.Sprintf("%s  %s: ", indent, fieldName))
 
 			// Recursively handle the field
-			sb.WriteString(StructToProtobuf(field.Interface(), indent+"  "))
+			sb.WriteString(StructToOption(field.Interface(), indent+"  "))
 			sb.WriteString(";\n")
 		}
 		sb.WriteString(fmt.Sprintf("%s}", indent))
@@ -165,7 +171,7 @@ func StructToProtobuf(value interface{}, indent string) string {
 		return fmt.Sprintf("%t", v.Bool())
 	case reflect.Ptr:
 		if !v.IsNil() {
-			return StructToProtobuf(v.Interface(), indent)
+			return StructToOption(v.Interface(), indent)
 		}
 		return ""
 	default:
@@ -189,16 +195,30 @@ func isZeroValue(v reflect.Value) bool {
 		return v.Uint() == 0
 	case reflect.Float32, reflect.Float64:
 		return v.Float() == 0
-	case reflect.Slice, reflect.Map, reflect.Ptr, reflect.Interface:
-		return v.IsNil()
+	case reflect.Complex64, reflect.Complex128:
+		return v.Complex() == 0
+	case reflect.Slice, reflect.Array:
+		return v.Len() == 0 // Check if slice or array is empty
+	case reflect.Map:
+		if v.Len() == 0 {
+			return true
+		}
+		for _, key := range v.MapKeys() {
+			value := v.MapIndex(key)
+			if !isZeroValue(value) {
+				return false
+			}
+		}
+		return true
 	case reflect.Struct:
-		// Recursively check if all fields in the struct are zero values
 		for i := 0; i < v.NumField(); i++ {
 			if !isZeroValue(v.Field(i)) {
 				return false
 			}
 		}
 		return true
+	case reflect.Ptr, reflect.Interface, reflect.Chan, reflect.Func:
+		return v.IsNil()
 	default:
 		return !v.IsValid()
 	}
@@ -275,8 +295,8 @@ func ConvertPath(path string) string {
 	return result
 }
 
-// ToUpperFirstLetter converts the first letter of a string to uppercase
-func ToUpperFirstLetter(s string) string {
+// ToUpperCase converts the first letter of a string to uppercase
+func ToUpperCase(s string) string {
 	if len(s) == 0 {
 		return s
 	}
@@ -290,20 +310,35 @@ func ToUpperFirstLetter(s string) string {
 	return string(firstChar) + s[1:]
 }
 
-func FormatNaming(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, "-", "_")
+func FormatStr(str string) string {
+	str = strings.ReplaceAll(str, " ", "_")
+	str = strings.ReplaceAll(str, "/", "_")
+	str = strings.ReplaceAll(str, "-", "_")
+	reg, _ := regexp.Compile(`[^a-zA-Z0-9_]`)
+	str = reg.ReplaceAllString(str, "")
+	return str
+}
+
+func ToCamelCase(name string) string {
+	name = strcase.ToCamel(name)
 	return name
 }
 
 func ToPascaleCase(name string) string {
 	name = strcase.ToCamel(name)
-	name = ToUpperFirstLetter(name)
+	name = ToUpperCase(name)
+	return name
+}
+
+func ToUpperSnakeCase(name string) string {
+	name = FormatStr(name)
+	name = ToSnake(name)
+	name = strings.ToUpper(name)
 	return name
 }
 
 func ToSnakeCase(name string) string {
-	name = FormatNaming(name)
+	name = FormatStr(name)
 	name = ToSnake(name)
 	return name
 }

@@ -3,6 +3,7 @@ package converter
 import (
 	"errors"
 	"fmt"
+
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/protobuf"
 	"github.com/hertz-contrib/swagger-generate/swagger2idl/utils"
@@ -47,11 +48,16 @@ func NewProtoConverter(spec *openapi3.T, option *ConvertOption) *ProtoConverter 
 
 // Convert converts the OpenAPI specification to a Proto file
 func (c *ProtoConverter) Convert() error {
-
 	// Convert the go Option to Proto
 	err := c.addExtensionsToProtoOptions()
 	if err != nil {
 		return fmt.Errorf("error parsing extensions to proto options: %w", err)
+	}
+
+	// Convert tags into Proto services
+	err = c.convertTagsToProtoServices()
+	if err != nil {
+		return fmt.Errorf("error converting tags to proto services: %w", err)
 	}
 
 	// Convert components into Proto messages
@@ -67,7 +73,7 @@ func (c *ProtoConverter) Convert() error {
 	}
 
 	if c.converterOption.OpenapiOption {
-		err = c.addOptionsToProto(c.spec)
+		err = c.addOptionsToProto()
 		if err != nil {
 			return fmt.Errorf("error parse options to proto: %w", err)
 		}
@@ -81,8 +87,8 @@ func (c *ProtoConverter) GetIdl() interface{} {
 }
 
 // addOptionsToProto adds options to the ProtoFile
-func (c *ProtoConverter) addOptionsToProto(spec *openapi3.T) error {
-	optionStr := utils.StructToProtobuf(spec, "     ")
+func (c *ProtoConverter) addOptionsToProto() error {
+	optionStr := utils.StructToOption(c.spec, "")
 
 	schemaOption := &protobuf.Option{
 		Name:  openapiDocumentOption,
@@ -126,6 +132,23 @@ func (c *ProtoConverter) addExtensionsToProtoOptions() error {
 	return nil
 }
 
+// convertTagsToProtoServices converts OpenAPI tags into Proto services and stores them in the ProtoFile
+func (c *ProtoConverter) convertTagsToProtoServices() error {
+	tags := c.spec.Tags
+	if tags == nil {
+		return nil
+	}
+	for _, tag := range tags {
+		serviceName := utils.ToPascaleCase(tag.Name)
+		service := &protobuf.ProtoService{
+			Name:        serviceName,
+			Description: tag.Description,
+		}
+		c.ProtoFile.Services = append(c.ProtoFile.Services, service)
+	}
+	return nil
+}
+
 // convertComponentsToProtoMessages converts OpenAPI components into Proto messages and stores them in the ProtoFile
 func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 	components := c.spec.Components
@@ -137,11 +160,14 @@ func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 	}
 	for name, schemaRef := range components.Schemas {
 		schema := schemaRef
-		fieldOrMessage, err := c.ConvertSchemaToProtoType(schema, name, nil)
+		if c.converterOption.NamingOption {
+			name = utils.ToPascaleCase(name)
+		}
+		protoType, err := c.ConvertSchemaToProtoType(schema, name, nil)
 		if err != nil {
 			return fmt.Errorf("error converting schema %s: %w", name, err)
 		}
-		switch v := fieldOrMessage.(type) {
+		switch v := protoType.(type) {
 		case *protobuf.ProtoField:
 			message := &protobuf.ProtoMessage{
 				Name:   name,
@@ -149,7 +175,7 @@ func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 			}
 
 			if c.converterOption.OpenapiOption {
-				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+				optionStr := utils.StructToOption(schema.Value, "    ")
 
 				schemaOption := &protobuf.Option{
 					Name:  openapiSchemaOption,
@@ -157,12 +183,11 @@ func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 				}
 				message.Options = append(message.Options, schemaOption)
 				c.AddProtoImport(openapiProtoFile)
-
 			}
 			c.addMessageToProto(message)
 		case *protobuf.ProtoMessage:
 			if c.converterOption.OpenapiOption {
-				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+				optionStr := utils.StructToOption(schema.Value, "    ")
 
 				schemaOption := &protobuf.Option{
 					Name:  openapiSchemaOption,
@@ -170,12 +195,11 @@ func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 				}
 				v.Options = append(v.Options, schemaOption)
 				c.AddProtoImport(openapiProtoFile)
-
 			}
 			c.addMessageToProto(v)
 		case *protobuf.ProtoEnum:
 			if c.converterOption.OpenapiOption {
-				optionStr := utils.StructToProtobuf(schema.Value, "    ")
+				optionStr := utils.StructToOption(schema.Value, "    ")
 
 				schemaOption := &protobuf.Option{
 					Name:  openapiSchemaOption,
@@ -183,9 +207,10 @@ func (c *ProtoConverter) convertComponentsToProtoMessages() error {
 				}
 				v.Options = append(v.Options, schemaOption)
 				c.AddProtoImport(openapiProtoFile)
-
 			}
 			c.addEnumToProto(v)
+		case *protobuf.ProtoOneOf:
+			// todo
 		}
 	}
 	return nil
@@ -210,13 +235,11 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 	for path, pathItem := range paths.Map() {
 		for method, operation := range pathItem.Operations() {
 			serviceName := utils.GetServiceName(operation)
-
 			methodName := utils.GetMethodName(operation, path, method)
 
 			if c.converterOption.NamingOption {
+				serviceName = utils.ToPascaleCase(serviceName)
 				methodName = utils.ToPascaleCase(methodName)
-			} else {
-				methodName = utils.ToUpperFirstLetter(methodName)
 			}
 
 			inputMessage, err := c.generateRequestMessage(operation, methodName)
@@ -229,7 +252,7 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 				return nil, fmt.Errorf("error generating response message for %s: %w", methodName, err)
 			}
 
-			service := c.findOrCreateService(&services, serviceName)
+			service := c.findOrCreateService(serviceName)
 
 			if !c.methodExistsInService(service, methodName) {
 				protoMethod := &protobuf.ProtoMethod{
@@ -250,7 +273,7 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 				}
 
 				if c.converterOption.OpenapiOption {
-					optionStr := utils.StructToProtobuf(operation, "     ")
+					optionStr := utils.StructToOption(operation, "     ")
 
 					schemaOption := &protobuf.Option{
 						Name:  openapiOperationOption,
@@ -271,11 +294,11 @@ func (c *ProtoConverter) ConvertPathsToProtoServices(paths *openapi3.Paths) ([]*
 // generateRequestMessage generates a request message for an operation
 func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, methodName string) (string, error) {
 	messageName := utils.GetMessageName(operation, methodName, "Request")
+
 	if c.converterOption.NamingOption {
 		messageName = utils.ToPascaleCase(messageName)
-	} else {
-		messageName = utils.ToUpperFirstLetter(messageName)
 	}
+
 	message := &protobuf.ProtoMessage{Name: messageName}
 
 	if operation.RequestBody == nil && len(operation.Parameters) == 0 {
@@ -285,6 +308,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 
 	if operation.RequestBody != nil {
 		if operation.RequestBody.Ref != "" {
+			//todo
 			return utils.ExtractMessageNameFromRef(operation.RequestBody.Ref), nil
 		}
 
@@ -292,7 +316,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 			for mediaTypeStr, mediaType := range operation.RequestBody.Value.Content {
 				schema := mediaType.Schema
 				if schema != nil {
-					protoType, err := c.ConvertSchemaToProtoType(schema, utils.FormatNaming(mediaTypeStr), message)
+					protoType, err := c.ConvertSchemaToProtoType(schema, utils.FormatStr(mediaTypeStr), message)
 					if err != nil {
 						return "", err
 					}
@@ -343,12 +367,12 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 					case *protobuf.ProtoEnum:
 						name := mediaTypeStr
 						if c.converterOption.NamingOption {
-							name = utils.ToPascaleCase(name)
+							name = utils.ToSnakeCase(name)
 						} else {
-							name = utils.FormatNaming(name)
+							name = utils.FormatStr(name)
 						}
 						newField := &protobuf.ProtoField{
-							Name: name + "_enum",
+							Name: name + "_field",
 							Type: v.Name,
 						}
 						if c.converterOption.ApiOption {
@@ -366,16 +390,16 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 								c.AddProtoImport(apiProtoFile)
 							}
 						}
-						//if c.converterOption.openapiOption {
-						//	optionStr := utils.StructToProtobuf(schema.Value, "     ")
-						//
-						//	schemaOption := &protobuf.Option{
-						//		Name:  openapiPropertyOption,
-						//		Value: optionStr,
-						//	}
-						//	newField.Options = append(newField.Options, schemaOption)
-						//	c.AddProtoImport(openapiProtoFile)
-						//}
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(schema.Value, "     ")
+
+							schemaOption := &protobuf.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							newField.Options = append(newField.Options, schemaOption)
+							c.AddProtoImport(openapiProtoFile)
+						}
 						message.Enums = append(message.Enums, v)
 						message.Fields = append(message.Fields, newField)
 					case *protobuf.ProtoOneOf:
@@ -393,7 +417,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 				if err != nil {
 					return "", err
 				}
-
+				description := param.Value.Description
 				switch v := fieldOrMessage.(type) {
 				case *protobuf.ProtoField:
 					if c.converterOption.ApiOption {
@@ -404,7 +428,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 						c.AddProtoImport(apiProtoFile)
 					}
 					if c.converterOption.OpenapiOption {
-						optionStr := utils.StructToProtobuf(param.Value, "     ")
+						optionStr := utils.StructToOption(param.Value, "     ")
 
 						schemaOption := &protobuf.Option{
 							Name:  openapiParameterOption,
@@ -413,6 +437,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 						v.Options = append(v.Options, schemaOption)
 						c.AddProtoImport(openapiProtoFile)
 					}
+					v.Description = description
 					c.addFieldIfNotExists(&message.Fields, v)
 				case *protobuf.ProtoMessage:
 					for _, field := range v.Fields {
@@ -424,7 +449,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 							c.AddProtoImport(apiProtoFile)
 						}
 						if c.converterOption.OpenapiOption {
-							optionStr := utils.StructToProtobuf(param.Value, "     ")
+							optionStr := utils.StructToOption(param.Value, "     ")
 
 							schemaOption := &protobuf.Option{
 								Name:  openapiParameterOption,
@@ -445,11 +470,9 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 					name := param.Value.Name
 					if c.converterOption.NamingOption {
 						name = utils.ToPascaleCase(name)
-					} else {
-						name = utils.ToUpperFirstLetter(name)
 					}
 					newField := &protobuf.ProtoField{
-						Name: name + "_enum",
+						Name: name + "_field",
 						Type: v.Name,
 					}
 					if c.converterOption.ApiOption {
@@ -460,7 +483,7 @@ func (c *ProtoConverter) generateRequestMessage(operation *openapi3.Operation, m
 						c.AddProtoImport(apiProtoFile)
 					}
 					if c.converterOption.OpenapiOption {
-						optionStr := utils.StructToProtobuf(param.Value, "     ")
+						optionStr := utils.StructToOption(param.Value, "     ")
 
 						schemaOption := &protobuf.Option{
 							Name:  openapiParameterOption,
@@ -503,22 +526,25 @@ func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation, 
 	}
 
 	if responseCount == 1 {
-		for statusCode, responseRef := range responses {
+		for _, responseRef := range responses {
 			if responseRef.Ref == "" && (responseRef.Value == nil || (len(responseRef.Value.Content) == 0 && len(responseRef.Value.Headers) == 0)) {
-				c.AddProtoImport(EmptyProtoFile)
-				return EmptyMessage, nil
+				continue
 			}
-			return c.processSingleResponse(statusCode, responseRef, operation, methodName)
+			return c.processSingleResponse("", responseRef, operation, methodName)
 		}
+	}
+
+	if responseCount == 0 {
+		c.AddProtoImport(EmptyProtoFile)
+		return EmptyMessage, nil
 	}
 
 	// create a wrapper message for multiple responses
 	wrapperMessageName := utils.GetMessageName(operation, methodName, "Response")
 	if c.converterOption.NamingOption {
 		wrapperMessageName = utils.ToPascaleCase(wrapperMessageName)
-	} else {
-		wrapperMessageName = utils.ToUpperFirstLetter(wrapperMessageName)
 	}
+
 	wrapperMessage := &protobuf.ProtoMessage{Name: wrapperMessageName}
 
 	emptyFlag := true
@@ -535,9 +561,7 @@ func (c *ProtoConverter) generateResponseMessage(operation *openapi3.Operation, 
 
 		name := "Response_" + statusCode
 		if c.converterOption.NamingOption {
-			name = utils.ToPascaleCase(name)
-		} else {
-			name = utils.ToUpperFirstLetter(name)
+			name = utils.ToSnakeCase(name)
 		}
 		field := &protobuf.ProtoField{
 			Name: name,
@@ -563,12 +587,12 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 	}
 
 	response := responseRef.Value
-	messageName := utils.GetMessageName(operation, methodName, "Response") + utils.ToUpperFirstLetter(statusCode)
+	messageName := utils.GetMessageName(operation, methodName, "Response") + utils.ToUpperCase(statusCode)
+
 	if c.converterOption.NamingOption {
 		messageName = utils.ToPascaleCase(messageName)
-	} else {
-		messageName = utils.ToUpperFirstLetter(messageName)
 	}
+
 	message := &protobuf.ProtoMessage{Name: messageName}
 
 	if len(response.Headers) > 0 {
@@ -590,6 +614,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 						v.Options = append(v.Options, option)
 						c.AddProtoImport(apiProtoFile)
 					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						v.Options = append(v.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
+					}
 					c.addFieldIfNotExists(&message.Fields, v)
 				case *protobuf.ProtoMessage:
 					for _, field := range v.Fields {
@@ -600,6 +634,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 							}
 							field.Options = append(field.Options, option)
 							c.AddProtoImport(apiProtoFile)
+						}
+						if c.converterOption.OpenapiOption {
+							optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+							schemaOption := &protobuf.Option{
+								Name:  openapiPropertyOption,
+								Value: optionStr,
+							}
+							field.Options = append(field.Options, schemaOption)
+							c.AddProtoImport(openapiProtoFile)
 						}
 						c.addFieldIfNotExists(&message.Fields, field)
 					}
@@ -613,11 +657,9 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 					name := headerName
 					if c.converterOption.NamingOption {
 						name = utils.ToSnakeCase(name)
-					} else {
-						name = utils.ToUpperFirstLetter(name)
 					}
 					newField := &protobuf.ProtoField{
-						Name: name,
+						Name: name + "_field",
 						Type: v.Name,
 					}
 					if c.converterOption.ApiOption {
@@ -627,6 +669,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 						}
 						newField.Options = append(newField.Options, option)
 						c.AddProtoImport(apiProtoFile)
+					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(headerRef.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						newField.Options = append(newField.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
 					}
 					message.Enums = append(message.Enums, v)
 					message.Fields = append(message.Fields, newField)
@@ -641,7 +693,7 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 		schema := mediaType.Schema
 		if schema != nil {
 
-			protoType, err := c.ConvertSchemaToProtoType(schema, utils.FormatNaming(mediaTypeStr), message)
+			protoType, err := c.ConvertSchemaToProtoType(schema, utils.FormatStr(mediaTypeStr), message)
 			if err != nil {
 				return "", err
 			}
@@ -656,6 +708,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 					v.Options = append(v.Options, option)
 					c.AddProtoImport(apiProtoFile)
 				}
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(schema.Value, "     ")
+
+					schemaOption := &protobuf.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					v.Options = append(v.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
+				}
 				c.addFieldIfNotExists(&message.Fields, v)
 			case *protobuf.ProtoMessage:
 				for _, field := range v.Fields {
@@ -666,6 +728,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 						}
 						field.Options = append(field.Options, option)
 						c.AddProtoImport(apiProtoFile)
+					}
+					if c.converterOption.OpenapiOption {
+						optionStr := utils.StructToOption(schema.Value, "     ")
+
+						schemaOption := &protobuf.Option{
+							Name:  openapiPropertyOption,
+							Value: optionStr,
+						}
+						field.Options = append(field.Options, schemaOption)
+						c.AddProtoImport(openapiProtoFile)
 					}
 					c.addFieldIfNotExists(&message.Fields, field)
 				}
@@ -680,10 +752,10 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 				if c.converterOption.NamingOption {
 					name = utils.ToSnakeCase(mediaTypeStr)
 				} else {
-					name = utils.ToUpperFirstLetter(name)
+					name = utils.ToUpperCase(name)
 				}
 				newField := &protobuf.ProtoField{
-					Name: name,
+					Name: name + "_field",
 					Type: v.Name,
 				}
 				if c.converterOption.ApiOption && mediaTypeStr == "application/json" {
@@ -693,6 +765,16 @@ func (c *ProtoConverter) processSingleResponse(statusCode string, responseRef *o
 					}
 					newField.Options = append(newField.Options, option)
 					c.AddProtoImport(apiProtoFile)
+				}
+				if c.converterOption.OpenapiOption {
+					optionStr := utils.StructToOption(schema.Value, "     ")
+
+					schemaOption := &protobuf.Option{
+						Name:  openapiPropertyOption,
+						Value: optionStr,
+					}
+					newField.Options = append(newField.Options, schemaOption)
+					c.AddProtoImport(openapiProtoFile)
 				}
 				message.Enums = append(message.Enums, v)
 				message.Fields = append(message.Fields, newField)
@@ -733,6 +815,8 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 	}
 
 	schema := schemaRef.Value
+	description := schema.Description
+
 	// Handle oneOf, allOf, anyOf even if schema.Type is nil
 	if len(schema.OneOf) > 0 {
 		protoUnion, err := c.handleOneOf(schema.OneOf, protoName, parentMessage)
@@ -765,10 +849,11 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 			if parentMessage == nil {
 				name = protoName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(protoName))
+				name = c.applyNamingOption(utils.ToUpperCase(protoName))
 			}
 			protoEnum := &protobuf.ProtoEnum{
-				Name: name + "Enum",
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
@@ -787,10 +872,11 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 			if parentMessage == nil {
 				name = protoName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(protoName))
+				name = c.applyNamingOption(utils.ToUpperCase(protoName))
 			}
 			protoEnum := &protobuf.ProtoEnum{
-				Name: name + "Enum",
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
@@ -811,10 +897,11 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 			if parentMessage == nil {
 				name = protoName
 			} else {
-				name = c.applyNamingOption(utils.ToUpperFirstLetter(protoName))
+				name = c.applyNamingOption(utils.ToUpperCase(protoName))
 			}
 			protoEnum := &protobuf.ProtoEnum{
-				Name: name + "Enum",
+				Name:        name + "Enum",
+				Description: description,
 			}
 			for i, enumValue := range schema.Enum {
 				protoEnum.Values = append(protoEnum.Values, &protobuf.ProtoEnumValue{
@@ -851,9 +938,10 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 			}
 
 			result = &protobuf.ProtoField{
-				Name:     c.applyNamingOption(protoName),
-				Type:     fieldType,
-				Repeated: true,
+				Name:        c.applyNamingOption(protoName),
+				Type:        fieldType,
+				Repeated:    true,
+				Description: description,
 			}
 		}
 
@@ -862,7 +950,7 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 		if parentMessage == nil {
 			message = &protobuf.ProtoMessage{Name: protoName}
 		} else {
-			message = &protobuf.ProtoMessage{Name: c.applyNamingOption(utils.ToUpperFirstLetter(protoName))}
+			message = &protobuf.ProtoMessage{Name: c.applyNamingOption(utils.ToUpperCase(protoName))}
 		}
 		for propName, propSchema := range schema.Properties {
 			protoType, err := c.ConvertSchemaToProtoType(propSchema, propName, message)
@@ -872,7 +960,7 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 
 			if field, ok := protoType.(*protobuf.ProtoField); ok {
 				if c.converterOption.OpenapiOption {
-					optionStr := utils.StructToProtobuf(propSchema.Value, "     ")
+					optionStr := utils.StructToOption(propSchema.Value, "     ")
 
 					schemaOption := &protobuf.Option{
 						Name:  openapiPropertyOption,
@@ -883,12 +971,16 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 				}
 				message.Fields = append(message.Fields, field)
 			} else if nestedMessage, ok := protoType.(*protobuf.ProtoMessage); ok {
+				var name string
+				if c.converterOption.NamingOption {
+					name = utils.ToSnakeCase(nestedMessage.Name)
+				}
 				newField := &protobuf.ProtoField{
-					Name: c.applyNamingOption(propName),
+					Name: name + "_field",
 					Type: nestedMessage.Name,
 				}
 				if c.converterOption.OpenapiOption {
-					optionStr := utils.StructToProtobuf(propSchema.Value, "     ")
+					optionStr := utils.StructToOption(propSchema.Value, "     ")
 
 					schemaOption := &protobuf.Option{
 						Name:  openapiPropertyOption,
@@ -905,6 +997,8 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 					Name: c.applyNamingOption(propName),
 					Type: enum.Name,
 				})
+			} else if oneOf, ok := protoType.(*protobuf.ProtoOneOf); ok {
+				c.addNestedOneOfToParent(message, oneOf)
 			}
 		}
 
@@ -921,19 +1015,21 @@ func (c *ProtoConverter) ConvertSchemaToProtoType(
 			}
 
 			message.Fields = append(message.Fields, &protobuf.ProtoField{
-				Name: "additionalProperties",
+				Name: "additional_properties",
 				Type: "map<string, " + mapValueType + ">",
 			})
 		}
 
+		message.Description = description
 		result = message
 	}
 
 	// If result is still nil, construct a default ProtoField
 	if result == nil {
 		result = &protobuf.ProtoField{
-			Name: c.applyNamingOption(protoName),
-			Type: protoType,
+			Name:        c.applyNamingOption(protoName),
+			Type:        protoType,
+			Description: description,
 		}
 	}
 
@@ -956,15 +1052,16 @@ func (c *ProtoConverter) handleOneOf(oneOfSchemas []*openapi3.SchemaRef, protoNa
 		case *protobuf.ProtoField:
 			oneOf.Fields = append(oneOf.Fields, v)
 		case *protobuf.ProtoMessage:
+			//todo naming
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedMessageToParent(parentMessage, v)
 			oneOf.Fields = append(oneOf.Fields, newField)
 		case *protobuf.ProtoEnum:
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedEnumToParent(parentMessage, v)
@@ -999,14 +1096,14 @@ func (c *ProtoConverter) handleAllOf(allOfSchemas []*openapi3.SchemaRef, protoNa
 			allOfMessage.Fields = append(allOfMessage.Fields, v)
 		case *protobuf.ProtoMessage:
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedMessageToParent(allOfMessage, v)
 			allOfMessage.Fields = append(allOfMessage.Fields, newField)
 		case *protobuf.ProtoEnum:
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedEnumToParent(allOfMessage, v)
@@ -1038,14 +1135,14 @@ func (c *ProtoConverter) handleAnyOf(anyOfSchemas []*openapi3.SchemaRef, protoNa
 			anyOfMessage.Fields = append(anyOfMessage.Fields, v)
 		case *protobuf.ProtoMessage:
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedMessageToParent(anyOfMessage, v)
 			anyOfMessage.Fields = append(anyOfMessage.Fields, newField)
 		case *protobuf.ProtoEnum:
 			newField := &protobuf.ProtoField{
-				Name: v.Name + "Field",
+				Name: v.Name + "_field",
 				Type: v.Name,
 			}
 			c.addNestedEnumToParent(anyOfMessage, v)
@@ -1064,7 +1161,7 @@ func (c *ProtoConverter) applyNamingOption(name string) string {
 	if c.converterOption.NamingOption {
 		return utils.ToPascaleCase(name)
 	}
-	return utils.ToUpperFirstLetter(name)
+	return name
 }
 
 // addNestedMessageToParent adds a nested message to a parent message
@@ -1096,7 +1193,7 @@ func (c *ProtoConverter) addMessageToProto(message *protobuf.ProtoMessage) error
 		// merge Fields
 		fieldNames := make(map[string]struct{})
 		for _, field := range existingMessage.Fields {
-			fieldNames[field.Name] = struct{}{} // 记录已有字段名称
+			fieldNames[field.Name] = struct{}{}
 		}
 		for _, newField := range message.Fields {
 			if _, exists := fieldNames[newField.Name]; !exists {
@@ -1190,17 +1287,19 @@ func (c *ProtoConverter) methodExistsInService(service *protobuf.ProtoService, m
 	return false
 }
 
-// findOrCreateService finds or creates a service
-func (c *ProtoConverter) findOrCreateService(services *[]*protobuf.ProtoService, serviceName string) *protobuf.ProtoService {
-	for i := range *services {
-		if (*services)[i].Name == serviceName {
-			return (*services)[i]
+// findOrCreateService finds an existing service by name or creates a new one if it doesn't exist
+func (c *ProtoConverter) findOrCreateService(serviceName string) *protobuf.ProtoService {
+	// Iterate over existing services to find a match
+	for i := range c.ProtoFile.Services {
+		if c.ProtoFile.Services[i].Name == serviceName {
+			return c.ProtoFile.Services[i]
 		}
 	}
 
+	// If no existing service is found, create a new one
 	newService := &protobuf.ProtoService{Name: serviceName}
-	*services = append(*services, newService)
-	return (*services)[len(*services)-1]
+	c.ProtoFile.Services = append(c.ProtoFile.Services, newService)
+	return newService
 }
 
 // addNestedOneOfToParent adds a nested oneOf to a parent message
